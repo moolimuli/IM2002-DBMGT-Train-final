@@ -73,5 +73,28 @@
       "refund_rule": "RF004",
       "notes": "A day pass offers better value than individual single tickets for passengers making 3 or more metro trips in a day. Tap in and out normally at each station."
     }
+  },
+  {
+    "ticket_type": "group",
+    "display_name": "Group Ticket (National Rail)",
+    "available_on": ["national_rail"],
+    "description": "A discounted ticket for groups of 10 or more passengers travelling together on the same national rail service. All passengers must travel on the same service between the same origin and destination.",
+    "national_rail": {
+      "pricing_model": "stops_based_with_fare_class",
+      "discount_percent": 10,
+      "minimum_group_size": 10,
+      "fare_classes": ["standard"],
+      "seat_assignment": true,
+      "validity": "Selected travel date and scheduled service only.",
+      "advance_purchase": true,
+      "advance_purchase_max_days": 90,
+      "changes_allowed": true,
+      "change_fee_usd": 1.00,
+      "change_deadline": "At least 24 hours before scheduled departure",
+      "refundable": true,
+      "refund_rule": "RF001 (normal service), RF002 (express service)",
+      "restrictions": "Group discount does not apply to first class, express services, or day passes. All passengers in the group must book in a single transaction. Group size cannot be changed after booking.",
+      "how_to_book": "Select 10 or more passengers in a single booking via the app or website. The 10% group discount is applied automatically at checkout."
+    }
   }
 ]

@@ -170,5 +170,56 @@
       }
     ],
     "exclusions": "Delays caused by third-party events (extreme weather, security incidents, government directives, or passenger-caused incidents) are not eligible for compensation."
+  },
+  {
+    "policy_id": "RF006",
+    "label": "Lost or Stolen Ticket",
+    "applies_to": {
+      "network_type": "national_rail",
+      "ticket_types": ["single", "return"]
+    },
+    "rules": [
+      {
+        "rule_id": "RF006_R1",
+        "condition": "Ticket lost before travel",
+        "action": "Passenger must purchase a new full-price ticket to travel. A replacement ticket can be requested via customer service within 7 days with proof of original purchase (booking reference or payment record). Replacement fee of $1.00 applies.",
+        "refund_of_original": "Original ticket is cancelled and refunded minus the $1.00 replacement fee, subject to the applicable cancellation window (RF001 or RF002)."
+      },
+      {
+        "rule_id": "RF006_R2",
+        "condition": "Ticket stolen",
+        "action": "A crime reference number from the police is required. With a valid crime reference number, the replacement fee is waived and the original ticket is reissued at no charge.",
+        "how_to_claim": "Contact customer service within 7 days of the incident with your booking reference and crime reference number."
+      },
+      {
+        "rule_id": "RF006_R3",
+        "condition": "Metro single ticket or day pass lost",
+        "action": "Metro tickets are non-replaceable. No refund or reissue is available for lost metro tickets.",
+        "reason": "Metro tickets are purchased and used immediately and cannot be uniquely identified after purchase."
+      }
+    ]
+  },
+  {
+    "policy_id": "RF007",
+    "label": "Engineering Works and Service Disruption Compensation",
+    "applies_to": {
+      "network_type": "all",
+      "ticket_types": ["single", "return", "day_pass"]
+    },
+    "rules": [
+      {
+        "rule_id": "RF007_R1",
+        "condition": "Planned engineering works result in full service cancellation on booked route",
+        "action": "100% refund of fare with no cancellation fee. Passengers are also entitled to free replacement bus service where available.",
+        "how_to_claim": "Refund is automatically processed within 5 business days. No claim required."
+      },
+      {
+        "rule_id": "RF007_R2",
+        "condition": "Unplanned service disruption causes journey to be impossible or delayed beyond 60 minutes",
+        "action": "Full refund of fare. Passengers may also claim reasonable alternative transport costs up to $15.00 with receipts.",
+        "how_to_claim": "Submit claim via app or customer service within 28 days."
+      }
+    ],
+    "notes": "Passengers are advised to check service alerts before travelling during known engineering windows. Planned works are announced at least 7 days in advance via the app and station notice boards."
   }
 ]
