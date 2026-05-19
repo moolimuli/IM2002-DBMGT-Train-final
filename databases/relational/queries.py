@@ -76,25 +76,65 @@ def query_national_rail_availability(
 ) -> list[dict]:
     sql = """
         SELECT
-            s.schedule_id, s.line, s.service_type, s.direction,
-            s.first_train_time::text, s.last_train_time::text, s.frequency_min,
-            s.standard_base_fare_usd, s.standard_per_stop_usd,
-            s.first_base_fare_usd, s.first_per_stop_usd,
+            s.schedule_id,
+            s.line,
+            s.service_type,
+            s.direction,
+            s.first_train_time::text,
+            s.last_train_time::text,
+            s.frequency_min,
+            orig_st.name AS origin_name,
+            dest_st.name AS destination_name,
             orig.travel_time_from_origin_min AS origin_time,
             dest.travel_time_from_origin_min AS dest_time,
-            dest.stop_order - orig.stop_order AS stops_travelled
+            (dest.travel_time_from_origin_min - orig.travel_time_from_origin_min) AS journey_time_min,
+            dest.stop_order - orig.stop_order AS stops_travelled,
+            ROUND((s.standard_base_fare_usd + s.standard_per_stop_usd * (dest.stop_order - orig.stop_order))::numeric, 2) AS standard_fare_usd,
+            ROUND((s.first_base_fare_usd + s.first_per_stop_usd * (dest.stop_order - orig.stop_order))::numeric, 2) AS first_fare_usd
         FROM national_rail_schedules s
         JOIN national_rail_schedule_stops orig
             ON orig.schedule_id = s.schedule_id AND orig.station_id = %s
         JOIN national_rail_schedule_stops dest
             ON dest.schedule_id = s.schedule_id AND dest.station_id = %s
+        JOIN national_rail_stations orig_st ON orig_st.station_id = %s
+        JOIN national_rail_stations dest_st ON dest_st.station_id = %s
         WHERE dest.stop_order > orig.stop_order
-        ORDER BY s.schedule_id
+        ORDER BY s.service_type DESC, s.schedule_id
     """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, (origin_id, destination_id))
-            return [dict(r) for r in cur.fetchall()]
+            cur.execute(sql, (origin_id, destination_id, origin_id, destination_id))
+            results = [dict(r) for r in cur.fetchall()]
+
+    # 如果有 travel_date，計算當天已訂座位數
+    if travel_date and results:
+        with _connect() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                for r in results:
+                    cur.execute("""
+                        SELECT
+                            COUNT(*) FILTER (WHERE fare_class = 'standard' AND status != 'cancelled') AS booked_standard,
+                            COUNT(*) FILTER (WHERE fare_class = 'first' AND status != 'cancelled') AS booked_first
+                        FROM national_rail_bookings
+                        WHERE schedule_id = %s AND travel_date = %s
+                    """, (r["schedule_id"], travel_date))
+                    counts = cur.fetchone()
+
+                    # 總座位數
+                    cur.execute("""
+                        SELECT
+                            COUNT(*) FILTER (WHERE fare_class = 'standard') AS total_standard,
+                            COUNT(*) FILTER (WHERE fare_class = 'first') AS total_first
+                        FROM national_rail_seat_layouts
+                        WHERE schedule_id = %s
+                    """, (r["schedule_id"],))
+                    totals = cur.fetchone()
+
+                    r["available_standard_seats"] = int(totals["total_standard"]) - int(counts["booked_standard"])
+                    r["available_first_seats"] = int(totals["total_first"]) - int(counts["booked_first"])
+                    r["travel_date"] = travel_date
+
+    return results
 
 
 def query_national_rail_fare(
@@ -132,21 +172,30 @@ def query_national_rail_fare(
 
 def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]:
     sql = """
-        SELECT s.schedule_id, s.line, s.direction,
-               s.first_train_time::text, s.last_train_time::text,
-               s.frequency_min, s.base_fare_usd, s.per_stop_rate_usd,
-               dest.stop_order - orig.stop_order AS stops_travelled
+        SELECT
+            s.schedule_id,
+            s.line,
+            s.direction,
+            s.first_train_time::text,
+            s.last_train_time::text,
+            s.frequency_min,
+            orig_st.name AS origin_name,
+            dest_st.name AS destination_name,
+            dest.stop_order - orig.stop_order AS stops_travelled,
+            ROUND((s.base_fare_usd + s.per_stop_rate_usd * (dest.stop_order - orig.stop_order))::numeric, 2) AS fare_usd
         FROM metro_schedules s
         JOIN metro_schedule_stops orig
             ON orig.schedule_id = s.schedule_id AND orig.station_id = %s
         JOIN metro_schedule_stops dest
             ON dest.schedule_id = s.schedule_id AND dest.station_id = %s
+        JOIN metro_stations orig_st ON orig_st.station_id = %s
+        JOIN metro_stations dest_st ON dest_st.station_id = %s
         WHERE dest.stop_order > orig.stop_order
         ORDER BY s.schedule_id
     """
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(sql, (origin_id, destination_id))
+            cur.execute(sql, (origin_id, destination_id, origin_id, destination_id))
             return [dict(r) for r in cur.fetchall()]
 
 
@@ -238,21 +287,61 @@ def query_user_bookings(user_email: str) -> dict:
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT b.*, o.name AS origin_name, d.name AS destination_name
+                SELECT
+                    b.booking_id,
+                    b.travel_date::text,
+                    b.departure_time::text,
+                    b.ticket_type,
+                    b.fare_class,
+                    b.coach,
+                    b.seat_id,
+                    b.stops_travelled,
+                    b.amount_usd,
+                    b.status,
+                    b.booked_at::text,
+                    b.travelled_at::text,
+                    b.schedule_id,
+                    s.line,
+                    s.service_type,
+                    o.station_id AS origin_id,
+                    o.name AS origin_name,
+                    d.station_id AS destination_id,
+                    d.name AS destination_name
                 FROM national_rail_bookings b
+                JOIN national_rail_schedules s ON s.schedule_id = b.schedule_id
                 JOIN national_rail_stations o ON o.station_id = b.origin_station_id
                 JOIN national_rail_stations d ON d.station_id = b.destination_station_id
-                WHERE b.user_id = %s ORDER BY b.travel_date DESC
+                WHERE b.user_id = %s
+                ORDER BY b.travel_date DESC, b.departure_time DESC
             """, (uid,))
             nr = [dict(r) for r in cur.fetchall()]
+
             cur.execute("""
-                SELECT t.*, o.name AS origin_name, d.name AS destination_name
+                SELECT
+                    t.trip_id,
+                    t.travel_date::text,
+                    t.ticket_type,
+                    t.day_pass_ref,
+                    t.stops_travelled,
+                    t.amount_usd,
+                    t.status,
+                    t.purchased_at::text,
+                    t.travelled_at::text,
+                    t.schedule_id,
+                    ms.line,
+                    o.station_id AS origin_id,
+                    o.name AS origin_name,
+                    d.station_id AS destination_id,
+                    d.name AS destination_name
                 FROM metro_travels t
+                JOIN metro_schedules ms ON ms.schedule_id = t.schedule_id
                 JOIN metro_stations o ON o.station_id = t.origin_station_id
                 JOIN metro_stations d ON d.station_id = t.destination_station_id
-                WHERE t.user_id = %s ORDER BY t.travel_date DESC
+                WHERE t.user_id = %s
+                ORDER BY t.travel_date DESC
             """, (uid,))
             metro = [dict(r) for r in cur.fetchall()]
+
     return {"national_rail": nr, "metro": metro}
 
 def query_payment_info(booking_id: str) -> Optional[dict]:

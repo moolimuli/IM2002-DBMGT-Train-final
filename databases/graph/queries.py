@@ -61,21 +61,50 @@ def query_shortest_route(
                 MATCH (start {station_id: $origin}), (end {station_id: $dest})
                 CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
                 YIELD path, weight
-                RETURN [node in nodes(path) | {
-                    station_id: node.station_id,
-                    name: node.name
-                }] AS stations,
-                weight AS total_time_min
+                WITH nodes(path) AS stations, relationships(path) AS legs, weight
+                RETURN
+                    [node IN stations | {
+                        station_id: node.station_id,
+                        name: node.name
+                    }] AS path,
+                    [r IN legs | {
+                        type: type(r),
+                        line: r.line,
+                        travel_time_min: r.travel_time_min
+                    }] AS legs,
+                    weight AS total_time_min
             """, origin=origin_id, dest=destination_id)
             record = result.single()
             if not record:
-                return {"found": False, "origin_id": origin_id, "destination_id": destination_id}
+                return {"found": False, "origin_id": origin_id, "destination_id": destination_id,
+                        "message": "No route found between these stations."}
+
+            path = record["path"]
+            legs = record["legs"]
+
+            # 組合每段說明
+            steps = []
+            for i, leg in enumerate(legs):
+                steps.append({
+                    "from": path[i]["name"],
+                    "from_id": path[i]["station_id"],
+                    "to": path[i+1]["name"],
+                    "to_id": path[i+1]["station_id"],
+                    "line": leg.get("line", "interchange"),
+                    "travel_time_min": leg.get("travel_time_min", 0),
+                    "type": leg["type"],
+                })
+
             return {
                 "found": True,
                 "origin_id": origin_id,
+                "origin_name": path[0]["name"],
                 "destination_id": destination_id,
+                "destination_name": path[-1]["name"],
                 "total_time_min": record["total_time_min"],
-                "path": record["stations"],
+                "num_stops": len(path) - 1,
+                "path": path,
+                "steps": steps,
             }
 
 
@@ -93,21 +122,50 @@ def query_cheapest_route(
                 MATCH (start {station_id: $origin}), (end {station_id: $dest})
                 CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
                 YIELD path, weight
-                RETURN [node in nodes(path) | {
-                    station_id: node.station_id,
-                    name: node.name
-                }] AS stations,
-                weight AS total_time_min
+                WITH nodes(path) AS stations, relationships(path) AS legs, weight
+                RETURN
+                    [node IN stations | {
+                        station_id: node.station_id,
+                        name: node.name
+                    }] AS path,
+                    [r IN legs | {
+                        type: type(r),
+                        line: r.line,
+                        travel_time_min: r.travel_time_min
+                    }] AS legs,
+                    weight AS total_time_min
             """, origin=origin_id, dest=destination_id)
             record = result.single()
             if not record:
-                return {"found": False}
+                return {"found": False, "origin_id": origin_id, "destination_id": destination_id,
+                        "message": "No route found."}
+
+            path = record["path"]
+            legs = record["legs"]
+            steps = []
+            for i, leg in enumerate(legs):
+                step = {
+                    "from": path[i]["name"],
+                    "from_id": path[i]["station_id"],
+                    "to": path[i+1]["name"],
+                    "to_id": path[i+1]["station_id"],
+                    "travel_time_min": leg.get("travel_time_min", 0),
+                    "type": leg["type"],
+                    "line": leg.get("line", ""),
+                }
+                steps.append(step)
+
             return {
                 "found": True,
-                "stations": record["stations"],
+                "origin_id": origin_id,
+                "origin_name": path[0]["name"],
+                "destination_id": destination_id,
+                "destination_name": path[-1]["name"],
                 "total_time_min": record["total_time_min"],
+                "num_stops": len(path) - 1,
+                "path": [{"station_id": s["station_id"], "name": s["name"]} for s in path],
+                "steps": steps,
             }
-
 
 # ── ALTERNATIVE ROUTES (avoiding a station) ───────────────────────────────────
 
@@ -118,7 +176,7 @@ def query_alternative_routes(
     avoid_station_id: str,
     network: str = "auto",
     max_routes: int = 3,
-) -> list[list[dict]]:
+) -> list[dict]:
     with _driver() as driver:
         with driver.session() as session:
             result = session.run("""
@@ -128,17 +186,37 @@ def query_alternative_routes(
                 WITH path, reduce(t=0, r IN relationships(path) | t + r.travel_time_min) AS total
                 ORDER BY total ASC
                 LIMIT $max_routes
-                RETURN [node IN nodes(path) | {
-                    station_id: node.station_id,
-                    name: node.name
-                }] AS stations, total AS total_time_min
+                RETURN
+                    [node IN nodes(path) | {
+                        station_id: node.station_id,
+                        name: node.name
+                    }] AS stations,
+                    [r IN relationships(path) | {
+                        line: r.line,
+                        travel_time_min: r.travel_time_min,
+                        type: type(r)
+                    }] AS legs,
+                    total AS total_time_min
             """, origin=origin_id, dest=destination_id,
                 avoid=avoid_station_id, max_routes=max_routes)
+
             routes = []
             for record in result:
+                stations = record["stations"]
+                legs = record["legs"]
+                steps = []
+                for i, leg in enumerate(legs):
+                    steps.append({
+                        "from": stations[i]["name"],
+                        "to": stations[i+1]["name"],
+                        "line": leg.get("line", "interchange"),
+                        "travel_time_min": leg.get("travel_time_min", 0),
+                    })
                 routes.append({
-                    "stations": record["stations"],
                     "total_time_min": record["total_time_min"],
+                    "num_stops": len(stations) - 1,
+                    "stations": [s["name"] for s in stations],
+                    "steps": steps,
                 })
             return routes
 
@@ -152,26 +230,65 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                 MATCH (start {station_id: $origin}), (end {station_id: $dest})
                 CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
                 YIELD path, weight
-                RETURN [node IN nodes(path) | {
-                    station_id: node.station_id,
-                    name: node.name
-                }] AS stations,
-                weight AS total_time_min
+                WITH nodes(path) AS stations, relationships(path) AS legs, weight
+                RETURN
+                    [node IN stations | {
+                        station_id: node.station_id,
+                        name: node.name,
+                        labels: labels(node)
+                    }] AS path,
+                    [r IN legs | {
+                        type: type(r),
+                        line: r.line,
+                        travel_time_min: r.travel_time_min
+                    }] AS legs,
+                    weight AS total_time_min
             """, origin=origin_id, dest=destination_id)
+
             record = result.single()
             if not record:
-                return {"found": False, "origin_id": origin_id, "destination_id": destination_id}
-            stations = record["stations"]
-            interchanges = [s for s in stations
-                           if (s["station_id"].startswith("MS") and destination_id.startswith("NR"))
-                           or (s["station_id"].startswith("NR") and destination_id.startswith("MS"))]
+                return {"found": False, "origin_id": origin_id, "destination_id": destination_id,
+                        "message": "No route found between these stations."}
+
+            path = record["path"]
+            legs = record["legs"]
+
+            # 找真正的換乘點（INTERCHANGE_TO 的那一段）
+            interchanges = []
+            steps = []
+            for i, leg in enumerate(legs):
+                step = {
+                    "from": path[i]["name"],
+                    "from_id": path[i]["station_id"],
+                    "to": path[i+1]["name"],
+                    "to_id": path[i+1]["station_id"],
+                    "travel_time_min": leg.get("travel_time_min", 5),
+                    "type": leg["type"],
+                }
+                if leg["type"] == "INTERCHANGE_TO":
+                    step["action"] = "Change network here"
+                    interchanges.append({
+                        "from_station": path[i]["name"],
+                        "from_id": path[i]["station_id"],
+                        "to_station": path[i+1]["name"],
+                        "to_id": path[i+1]["station_id"],
+                    })
+                else:
+                    step["line"] = leg.get("line", "")
+                steps.append(step)
+
             return {
                 "found": True,
-                "stations": stations,
-                "interchange_points": interchanges,
+                "origin_id": origin_id,
+                "origin_name": path[0]["name"],
+                "destination_id": destination_id,
+                "destination_name": path[-1]["name"],
                 "total_time_min": record["total_time_min"],
+                "num_stops": len(path) - 1,
+                "interchange_points": interchanges,
+                "path": [{"station_id": s["station_id"], "name": s["name"]} for s in path],
+                "steps": steps,
             }
-
 
 # ── DELAY RIPPLE ANALYSIS ─────────────────────────────────────────────────────
 

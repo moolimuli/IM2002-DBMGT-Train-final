@@ -99,19 +99,43 @@ def _inject_station_ids(text: str) -> str:
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are TransitFlow, a transit assistant for a dual-network system.
+SYSTEM_PROMPT = """You are TransitFlow, an AI assistant for a dual-network transit system.
 
-Networks: City Metro MS01-MS20 (lines M1-M4) | National Rail NR01-NR10 (lines NR1-NR2)
-Interchanges: Central=MS01/NR01 | Old Town=MS07/NR03 | Ferndale=MS15/NR07
+Networks:
+- City Metro: stations MS01-MS20, lines M1, M2, M3, M4
+- National Rail: stations NR01-NR10, lines NR1, NR2
+- Interchanges: MS01=NR01 (Central), MS07=NR03 (Old Town), MS15=NR07 (Ferndale)
+
 Today: {today}
 
-LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first.
+CRITICAL RULES — follow these exactly:
+1. When DATABASE DATA is provided, use ONLY that data. Never contradict it.
+2. IMPORTANT: Routes, fares, schedules, and policies are PUBLIC - answer them WITHOUT asking for login. ONLY make_booking and cancel_booking need login. Never refuse a route or schedule question due to login.
+3. For train availability: report EACH service separately. Do not mix or combine services.
+4. service_type field tells you if it is "normal" or "express" — use this exactly as given.
+5. first_train_time = earliest departure, last_train_time = latest departure, frequency_min = minutes between trains.
+6. journey_time_min = total travel time for that service. Report each service's own journey time separately.
+7. standard_fare_usd = standard class price. first_fare_usd = first class price. NEVER add them together.
+8. For routes: list ALL stations in order with →, mention line changes, state total_time_min.
+9. Never suggest checking another website. Answer only from provided data.
+10. For delay, refund, compensation, luggage, pets, or any policy question: use the search_policy tool and report what the policy says directly.
+11. If the data contains compensation rules or refund percentages, state them clearly and directly.
 
-When DATA FROM TRANSITFLOW DATABASE is provided, use it as the only source of truth. Do not contradict it or say a route was not found if the data shows one.
-For route results: list every station name in order, note any line changes, and give the total travel time.
-Always reply in the same language as the user.
+ANSWER FORMAT for train availability (MUST follow this):
+For each service in the data, report separately:
+- Service: [schedule_id] [service_type] ([line])
+- Hours: [first_train_time] to [last_train_time], every [frequency_min] minutes
+- Journey time: [journey_time_min] minutes
+- Standard fare: $[standard_fare_usd] | First class: $[first_fare_usd]
+
+ANSWER FORMAT for routes:
+[origin] → [station] ([line], Xmin) → [destination]
+Total: X minutes
+
+ANSWER FORMAT for compensation/refund policy:
+State the rule ID, condition, and compensation amount directly.
+Example: "Under RF005, a 30-59 minute delay entitles you to a 50% refund."
 """.format(today=date.today().isoformat())
-
 
 # ── Tool definitions (sent to the LLM to decide which to call) ────────────────
 
@@ -227,9 +251,11 @@ TOOLS = [
     {
         "name": "search_policy",
         "description": (
-            "Search company policy documents. Use for any question about: "
-            "refunds, delay compensation, luggage, bicycles, pets, food and drink, "
-            "conduct, booking rules, ticket types, fare evasion, or child fares."
+            "ALWAYS use this for ANY question about: delay compensation, refunds, "
+            "cancelled trains, luggage, bicycles, pets, food, conduct, booking rules, "
+            "ticket types, child fares, group discounts, lost property, accessibility, "
+            "or any 'what is the policy' question. "
+            "Do NOT use check_national_rail_availability for policy questions."
         ),
         "parameters": {
             "query": {"type": "string", "description": "Natural language question about policy"},
@@ -284,7 +310,7 @@ get_available_seats(schedule_id, travel_date, fare_class)
 make_booking(schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, ticket_type?)
 cancel_booking(booking_id)
 get_user_bookings()
-search_policy(query)
+search_policy(query)  # USE THIS for delay/refund/compensation/luggage/pets/policy questions
 find_alternative_routes(origin_id, destination_id, avoid_station_id, network?)
 get_delay_ripple(station_id, hops?)"""
 
@@ -384,14 +410,21 @@ def _execute_tool(
         elif tool_name == "search_policy":
             embedding = llm.embed(params["query"])
             docs = query_policy_vector_search(embedding)
+            # 去除重複標題，只保留每個標題最高相似度的一筆
+            seen_titles = set()
+            unique_docs = []
+            for d in docs:
+                if d["title"] not in seen_titles:
+                    seen_titles.add(d["title"])
+                    unique_docs.append(d)
             result = [
                 {
                     "title":      d["title"],
                     "category":   d["category"],
-                    "content":    d["content"][:800],
+                    "content":    d["content"][:1500],
                     "similarity": round(d["similarity"], 3),
                 }
-                for d in docs
+                for d in unique_docs
             ]
 
         elif tool_name == "find_route":
@@ -476,21 +509,155 @@ def _flatten_to_text(obj, depth: int = 0) -> str:
     else:
         return f"{pad}{obj}"
 
-
 def _normalise_result(tool_name: str, result_json: str) -> str:
-    """
-    Convert raw tool JSON to structured readable text for the answer LLM.
-    Pure Python — works for any tool output without per-tool code.
-    Students never need to touch this when adding new tools.
-    """
     try:
         data = json.loads(result_json)
     except json.JSONDecodeError:
         return result_json
     if isinstance(data, dict) and "error" in data:
         return f"Error: {data['error']}"
-    return _flatten_to_text(data)
 
+    # 針對特定工具產生更清楚的文字
+    if tool_name == "search_policy":
+        if not data:
+            return "No policy found."
+        lines = []
+        for doc in data:
+            lines.append(f"Policy: {doc.get('title','')}")
+            # 嘗試解析 JSON content
+            content = doc.get("content", "")
+            try:
+                policy = json.loads(content)
+                # 補償規則
+                if "compensation_rules" in policy:
+                    lines.append("Compensation rules:")
+                    for rule in policy["compensation_rules"]:
+                        lines.append(f"  - {rule.get('condition','')}: {rule.get('compensation','')}")
+                        lines.append(f"    How to claim: {rule.get('how_to_claim','')}")
+                # 取消視窗
+                if "cancellation_windows" in policy:
+                    lines.append("Cancellation/refund rules:")
+                    for w in policy["cancellation_windows"]:
+                        lines.append(f"  - {w.get('condition','')}: {w.get('refund_percent','')}% refund")
+                # 一般內容
+                for key in ["notes", "exclusions", "no_show_policy", "return_ticket_notes"]:
+                    if key in policy:
+                        lines.append(f"{key.replace('_',' ').title()}: {policy[key]}")
+            except Exception:
+                lines.append(content[:800])
+            lines.append("")
+        return "\n".join(lines)
+
+    if tool_name == "find_route":
+        if not data or not data.get("found"):
+            return "No route found."
+        steps = data.get("steps", [])
+        path_str = ""
+        if steps:
+            parts = [steps[0]["from"]]
+            for step in steps:
+                line_info = f"({step.get('line', step.get('type',''))} {step.get('travel_time_min','')}min)"
+                parts.append(f"→ {line_info} {step['to']}")
+            path_str = " ".join(parts)
+        return (
+            f"Route from {data.get('origin_name','')} to {data.get('destination_name','')}:\n"
+            f"{path_str}\n"
+            f"Total travel time: {data.get('total_time_min','')} minutes, "
+            f"{data.get('num_stops','')} stops."
+        )
+
+    if tool_name == "check_metro_availability":
+        if not data:
+            return "No metro service found for this route."
+        lines = ["Metro services available:"]
+        for s in data:
+            lines.append(
+                f"\n- Line {s.get('line','')} ({s.get('direction','')})"
+                f" schedule {s.get('schedule_id','')}"
+            )
+            lines.append(
+                f"  From {s.get('origin_name','')} to {s.get('destination_name','')}"
+            )
+            lines.append(
+                f"  First train: {s.get('first_train_time','')}, "
+                f"Last train: {s.get('last_train_time','')}, "
+                f"Every {s.get('frequency_min','')} minutes"
+            )
+            lines.append(
+                f"  Stops: {s.get('stops_travelled','')}, Fare: ${s.get('fare_usd','')}"
+            )
+        return "\n".join(lines)
+
+    if tool_name == "get_user_bookings":
+        if not data:
+            return "No bookings found."
+        lines = []
+        nr = data.get("national_rail", [])
+        metro = data.get("metro", [])
+        if nr:
+            lines.append("National Rail bookings:")
+            for b in nr:
+                lines.append(
+                    f"- {b.get('booking_id','')} | {b.get('travel_date','')} "
+                    f"{b.get('departure_time','')} | "
+                    f"{b.get('origin_name','')} → {b.get('destination_name','')} | "
+                    f"{b.get('service_type','')} {b.get('fare_class','')} | "
+                    f"Seat {b.get('coach','')}{b.get('seat_id','')} | "
+                    f"${b.get('amount_usd','')} | {b.get('status','')}"
+                )
+        else:
+            lines.append("No national rail bookings.")
+        if metro:
+            lines.append("\nMetro trips:")
+            for t in metro:
+                lines.append(
+                    f"- {t.get('trip_id','')} | {t.get('travel_date','')} | "
+                    f"{t.get('origin_name','')} → {t.get('destination_name','')} | "
+                    f"Line {t.get('line','')} | "
+                    f"{t.get('ticket_type','')} | "
+                    f"${t.get('amount_usd','')} | {t.get('status','')}"
+                )
+        else:
+            lines.append("No metro trips.")
+        return "\n".join(lines)
+
+    if tool_name == "find_alternative_routes":
+        if not data:
+            return "No alternative routes found."
+        lines = ["Alternative routes:"]
+        for i, route in enumerate(data, 1):
+            legs = route.get("legs", route)
+            if isinstance(legs, dict):
+                stations = legs.get("stations", [])
+                total = legs.get("total_time_min", "")
+                lines.append(f"\nRoute {i} ({total} min): {' → '.join(stations)}")
+            else:
+                lines.append(f"\nRoute {i}: {route}")
+        return "\n".join(lines)
+
+    if tool_name == "make_booking":
+        if isinstance(data, dict) and "booking_id" in data:
+            return (
+                f"Booking confirmed!\n"
+                f"Booking ID: {data.get('booking_id','')}\n"
+                f"Route: {data.get('origin_station_id','')} → {data.get('destination_station_id','')}\n"
+                f"Date: {data.get('travel_date','')}\n"
+                f"Seat: {data.get('coach','')}{data.get('seat_id','')}\n"
+                f"Fare: ${data.get('amount_usd','')}\n"
+                f"Status: {data.get('status','')}"
+            )
+
+    if tool_name == "cancel_booking":
+        if isinstance(data, dict) and "booking_id" in data:
+            return (
+                f"Booking {data.get('booking_id','')} cancelled.\n"
+                f"Original amount: ${data.get('original_amount_usd','')}\n"
+                f"Refund: ${data.get('refund_amount_usd','')}\n"
+                f"Policy: {data.get('policy_applied','')}"
+            )
+
+    # 預設：用原本的 flatten
+    return _flatten_to_text(data)
 
 def _summarise_result(tool_name: str, result_json: str) -> str:
     """Raw result string shown in the debug panel only."""
