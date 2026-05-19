@@ -55,20 +55,28 @@ def query_shortest_route(
     destination_id: str,
     network: str = "auto",
 ) -> dict:
-    """
-    Find the fastest path between two stations, minimising total travel time.
-    Uses apoc.algo.dijkstra (APOC required; enabled in docker-compose.yml).
-
-    Args:
-        origin_id:       e.g. "MS01" or "NR01"
-        destination_id:  e.g. "MS09" or "NR05"
-        network:         "metro", "rail", or "auto" (inferred from IDs)
-
-    Returns:
-        dict with keys: found, origin_id, destination_id,
-                        total_time_min, path (list of station dicts), legs
-    """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (start {station_id: $origin}), (end {station_id: $dest})
+                CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
+                YIELD path, weight
+                RETURN [node in nodes(path) | {
+                    station_id: node.station_id,
+                    name: node.name
+                }] AS stations,
+                weight AS total_time_min
+            """, origin=origin_id, dest=destination_id)
+            record = result.single()
+            if not record:
+                return {"found": False, "origin_id": origin_id, "destination_id": destination_id}
+            return {
+                "found": True,
+                "origin_id": origin_id,
+                "destination_id": destination_id,
+                "total_time_min": record["total_time_min"],
+                "path": record["stations"],
+            }
 
 
 # ── CHEAPEST ROUTE (Dijkstra by fare) ────────────────────────────────────────
@@ -79,22 +87,30 @@ def query_cheapest_route(
     network: str = "auto",
     fare_class: str = "standard",
 ) -> dict:
-    """
-    Find the cheapest path between two stations, minimising total estimated fare.
-
-    Args:
-        origin_id:       e.g. "NR01"
-        destination_id:  e.g. "NR05"
-        network:         "metro", "rail", or "auto"
-        fare_class:      "standard" or "first" (national rail only)
-
-    Returns:
-        dict with found, total_fare_usd (approximate), stations, legs
-    """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (start {station_id: $origin}), (end {station_id: $dest})
+                CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
+                YIELD path, weight
+                RETURN [node in nodes(path) | {
+                    station_id: node.station_id,
+                    name: node.name
+                }] AS stations,
+                weight AS total_time_min
+            """, origin=origin_id, dest=destination_id)
+            record = result.single()
+            if not record:
+                return {"found": False}
+            return {
+                "found": True,
+                "stations": record["stations"],
+                "total_time_min": record["total_time_min"],
+            }
 
 
 # ── ALTERNATIVE ROUTES (avoiding a station) ───────────────────────────────────
+
 
 def query_alternative_routes(
     origin_id: str,
@@ -103,64 +119,88 @@ def query_alternative_routes(
     network: str = "auto",
     max_routes: int = 3,
 ) -> list[list[dict]]:
-    """
-    Find paths between two stations that avoid a specific intermediate station.
-    Useful for routing around a delayed or closed station.
-
-    Args:
-        origin_id:         e.g. "NR01"
-        destination_id:    e.g. "NR05"
-        avoid_station_id:  e.g. "NR03"
-        network:           "metro", "rail", or "auto"
-        max_routes:        max number of alternatives to return
-
-    Returns:
-        List of routes, each route is a list of leg dicts
-    """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (start {station_id: $origin}), (end {station_id: $dest})
+                MATCH path = (start)-[:METRO_LINK|RAIL_LINK|INTERCHANGE_TO*..15]->(end)
+                WHERE NONE(n IN nodes(path) WHERE n.station_id = $avoid)
+                WITH path, reduce(t=0, r IN relationships(path) | t + r.travel_time_min) AS total
+                ORDER BY total ASC
+                LIMIT $max_routes
+                RETURN [node IN nodes(path) | {
+                    station_id: node.station_id,
+                    name: node.name
+                }] AS stations, total AS total_time_min
+            """, origin=origin_id, dest=destination_id,
+                avoid=avoid_station_id, max_routes=max_routes)
+            routes = []
+            for record in result:
+                routes.append({
+                    "stations": record["stations"],
+                    "total_time_min": record["total_time_min"],
+                })
+            return routes
 
 
 # ── CROSS-NETWORK INTERCHANGE PATH ───────────────────────────────────────────
 
 def query_interchange_path(origin_id: str, destination_id: str) -> dict:
-    """
-    Find a path between a metro station and a national rail station (or vice versa)
-    crossing the network boundary via interchange relationships.
-
-    Args:
-        origin_id:       e.g. "MS03" (metro) or "NR05" (national rail)
-        destination_id:  e.g. "NR05" (national rail) or "MS09" (metro)
-
-    Returns:
-        dict with found, stations list, interchange points, total_time_min
-    """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (start {station_id: $origin}), (end {station_id: $dest})
+                CALL apoc.algo.dijkstra(start, end, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min')
+                YIELD path, weight
+                RETURN [node IN nodes(path) | {
+                    station_id: node.station_id,
+                    name: node.name
+                }] AS stations,
+                weight AS total_time_min
+            """, origin=origin_id, dest=destination_id)
+            record = result.single()
+            if not record:
+                return {"found": False, "origin_id": origin_id, "destination_id": destination_id}
+            stations = record["stations"]
+            interchanges = [s for s in stations
+                           if (s["station_id"].startswith("MS") and destination_id.startswith("NR"))
+                           or (s["station_id"].startswith("NR") and destination_id.startswith("MS"))]
+            return {
+                "found": True,
+                "stations": stations,
+                "interchange_points": interchanges,
+                "total_time_min": record["total_time_min"],
+            }
 
 
 # ── DELAY RIPPLE ANALYSIS ─────────────────────────────────────────────────────
 
 def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
-    """
-    Find all stations within N hops of a delayed or disrupted station.
-    Works on both metro and national rail networks.
-
-    Args:
-        delayed_station_id: e.g. "NR03" or "MS01"
-        hops:               how many connections out to search (default 2)
-
-    Returns:
-        List of dicts: {station_id, name, hops_away, lines_affected}
-    """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (start {station_id: $station_id})
+                MATCH (start)-[:METRO_LINK|RAIL_LINK*1..$hops]-(affected)
+                WHERE affected.station_id <> $station_id
+                RETURN DISTINCT affected.station_id AS station_id,
+                       affected.name AS name,
+                       min(length(shortestPath((start)-[:METRO_LINK|RAIL_LINK*]-(affected)))) AS hops_away
+                ORDER BY hops_away
+            """, station_id=delayed_station_id, hops=hops)
+            return [dict(r) for r in result]
 
 
 # ── STATION CONNECTIONS ───────────────────────────────────────────────────────
 
 def query_station_connections(station_id: str) -> list[dict]:
-    """
-    List all direct connections from a given station.
-
-    Args:
-        station_id: e.g. "MS01" or "NR01"
-    """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (s {station_id: $station_id})-[r:METRO_LINK|RAIL_LINK|INTERCHANGE_TO]->(n)
+                RETURN n.station_id AS station_id,
+                       n.name AS name,
+                       type(r) AS relationship,
+                       r.travel_time_min AS travel_time_min,
+                       r.line AS line
+            """, station_id=station_id)
+            return [dict(r) for r in result]

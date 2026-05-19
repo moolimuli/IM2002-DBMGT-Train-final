@@ -112,4 +112,24 @@
     "customer_service": "Passengers with queries or complaints may contact customer service via the in-app chat, email, or station help desks. Response time is within 2 business days.",
     "dispute_resolution": "If a passenger disagrees with a refund decision, they may escalate the case to the customer service team within 14 days of the original decision."
   }
+  ,
+"group_bookings": {
+  "national_rail": {
+    "minimum_group_size": 10,
+    "discount_percent": 10,
+    "applicable_class": "standard",
+    "conditions": "Group discount applies to standard class single and return tickets only. All group members must travel on the same service on the same date. Discount is applied automatically when 10 or more tickets are purchased in a single transaction.",
+    "not_applicable": "Group discount does not apply to first class tickets, express services, or metro day passes.",
+    "how_to_book": "Group bookings must be made via the app or website. Walk-in group bookings at ticket counters are subject to availability.",
+    "payment": "Full payment is required at the time of booking for all group tickets.",
+    "cancellation": "Group bookings follow the same refund policy as individual tickets (RF001 for normal, RF002 for express). Each ticket in the group is assessed independently.",
+    "changes": "Changes to group bookings (travel date or seat selection) incur a $1.00 fee per ticket changed. Route and fare class cannot be changed.",
+    "schools_and_charities": "Schools and registered charities may apply for an additional 5% discount on top of the standard group rate. Contact customer service with proof of status at least 7 days before travel."
+  },
+  "metro": {
+    "available": false,
+    "description": "Group discounts are not available on metro services. Each passenger must purchase their own single ticket or day pass.",
+    "school_groups": "School groups travelling on the metro are advised to purchase individual tickets. Contact customer service for guidance on managing large groups at stations."
+  }
+}
 }
