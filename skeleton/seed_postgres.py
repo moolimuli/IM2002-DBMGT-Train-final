@@ -48,7 +48,22 @@ def insert_many(cur, table, columns, rows):
         f"ON CONFLICT DO NOTHING"
     )
     execute_values(cur, sql, rows)
-    return cur.rowcount
+    # cur.rowcount can be -1 after execute_values + ON CONFLICT DO NOTHING
+    # in some psycopg2 versions; fall back to len(rows) in that case.
+    return cur.rowcount if cur.rowcount >= 0 else len(rows)
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+
+def _infer_booking_type(booking_id: str) -> str:
+    """Return 'rail' for BK* IDs and 'metro' for MT* IDs. Raises on unknown prefix."""
+    if booking_id.startswith("BK"):
+        return 'rail'
+    elif booking_id.startswith("MT"):
+        return 'metro'
+    raise ValueError(
+        f"Unknown booking_id prefix: {booking_id!r} — expected 'BK' (rail) or 'MT' (metro)"
+    )
 
 
 # ── seeders ──────────────────────────────────────────────────────────────────
@@ -69,7 +84,7 @@ def seed_metro_stations(cur):
     ]
     n = insert_many(cur, "metro_stations",
                     ["station_id", "name", "is_interchange_metro",
-                     "is_interchange_national_rail", "interchange_nr_station_id"],
+                     "is_interchange_national_rail", "interchange_national_rail_station_id"],
                     rows)
     print(f"  metro_stations: {n} rows")
 
@@ -105,8 +120,8 @@ def seed_national_rail_stations(cur):
     for s in data:
         for line in s["lines"]:
             line_rows.append((s["station_id"], line))
-    n = insert_many(cur, "nr_station_lines", ["station_id", "line"], line_rows)
-    print(f"  nr_station_lines: {n} rows")
+    n = insert_many(cur, "national_rail_station_lines", ["station_id", "line"], line_rows)
+    print(f"  national_rail_station_lines: {n} rows")
 
 
 def seed_metro_schedules(cur):
@@ -179,20 +194,20 @@ def seed_national_rail_schedules(cur):
         )
         for s in data
     ]
-    n = insert_many(cur, "nr_schedules",
+    n = insert_many(cur, "national_rail_schedules",
                     ["schedule_id", "line", "service_type", "direction",
                      "origin_station_id", "destination_station_id",
                      "first_train_time", "last_train_time", "frequency_min"],
                     rows)
-    print(f"  nr_schedules: {n} rows")
+    print(f"  national_rail_schedules: {n} rows")
 
     # Operating days
     day_rows = []
     for s in data:
         for day in s["operates_on"]:
             day_rows.append((s["schedule_id"], day))
-    n = insert_many(cur, "nr_schedule_days", ["schedule_id", "day_of_week"], day_rows)
-    print(f"  nr_schedule_days: {n} rows")
+    n = insert_many(cur, "national_rail_schedule_days", ["schedule_id", "day_of_week"], day_rows)
+    print(f"  national_rail_schedule_days: {n} rows")
 
     # Stops — express services also have "passed_through_stations" that are skipped
     stop_rows = []
@@ -205,7 +220,7 @@ def seed_national_rail_schedules(cur):
                 station_id,
                 order,
                 times[station_id],
-                False,  # is_express_skip — these are actual stops
+                'stop',  # stop_type — these are actual stops
             ))
         # Also record the skipped stations (order=0 marks them as pass-through)
         for station_id in passed:
@@ -214,13 +229,13 @@ def seed_national_rail_schedules(cur):
                 station_id,
                 0,
                 0,
-                True,
+                'pass_through',
             ))
-    n = insert_many(cur, "nr_schedule_stops",
+    n = insert_many(cur, "national_rail_schedule_stops",
                     ["schedule_id", "station_id", "stop_order",
-                     "travel_time_from_origin_min", "is_express_skip"],
+                     "travel_time_from_origin_min", "stop_type"],
                     stop_rows)
-    print(f"  nr_schedule_stops: {n} rows")
+    print(f"  national_rail_schedule_stops: {n} rows")
 
     # Fare classes
     fare_rows = []
@@ -232,10 +247,10 @@ def seed_national_rail_schedules(cur):
                 details["base_fare_usd"],
                 details["per_stop_rate_usd"],
             ))
-    n = insert_many(cur, "nr_fare_classes",
+    n = insert_many(cur, "national_rail_fare_classes",
                     ["schedule_id", "fare_class", "base_fare_usd", "per_stop_rate_usd"],
                     fare_rows)
-    print(f"  nr_fare_classes: {n} rows")
+    print(f"  national_rail_fare_classes: {n} rows")
 
 
 def seed_seat_layouts(cur):
@@ -254,11 +269,11 @@ def seed_seat_layouts(cur):
                     seat["row"],
                     seat["column"],
                 ))
-    n = insert_many(cur, "seat_layouts",
+    n = insert_many(cur, "national_rail_seat_layouts",
                     ["layout_id", "schedule_id", "coach", "fare_class",
-                     "seat_id", "row", "col"],
+                     "seat_id", "row_num", "col_name"],
                     rows)
-    print(f"  seat_layouts: {n} rows")
+    print(f"  national_rail_seat_layouts: {n} rows")
 
 
 def seed_users(cur):
@@ -359,6 +374,7 @@ def seed_payments(cur):
         (
             p["payment_id"],
             p["booking_id"],
+            _infer_booking_type(p["booking_id"]),
             p["amount_usd"],
             p["method"],
             p["status"],
@@ -367,7 +383,7 @@ def seed_payments(cur):
         for p in data
     ]
     n = insert_many(cur, "payments",
-                    ["payment_id", "booking_id", "amount_usd",
+                    ["payment_id", "booking_id", "booking_type", "amount_usd",
                      "method", "status", "paid_at"],
                     rows)
     print(f"  payments: {n} rows")
@@ -380,6 +396,7 @@ def seed_feedback(cur):
         (
             f["feedback_id"],
             f["booking_id"],
+            _infer_booking_type(f["booking_id"]),
             f["user_id"],
             f["rating"],
             f.get("comment"),    # may be None
@@ -388,7 +405,7 @@ def seed_feedback(cur):
         for f in data
     ]
     n = insert_many(cur, "feedback",
-                    ["feedback_id", "booking_id", "user_id",
+                    ["feedback_id", "booking_id", "booking_type", "user_id",
                      "rating", "comment", "submitted_at"],
                     rows)
     print(f"  feedback: {n} rows")

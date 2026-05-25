@@ -46,14 +46,14 @@ def seed():
                     n.lines                        = $lines,
                     n.is_interchange_metro         = $is_interchange_metro,
                     n.is_interchange_national_rail = $is_interchange_national_rail,
-                    n.interchange_nr_station_id    = $interchange_nr_station_id
+                    n.interchange_national_rail_station_id = $interchange_national_rail_station_id
                 """,
                 id=s["station_id"],
                 name=s["name"],
                 lines=s["lines"],
                 is_interchange_metro=s["is_interchange_metro"],
                 is_interchange_national_rail=s["is_interchange_national_rail"],
-                interchange_nr_station_id=s.get("interchange_national_rail_station_id"),
+                interchange_national_rail_station_id=s.get("interchange_national_rail_station_id"),
             )
         print(f"  Created {len(metro_stations)} MetroStation nodes")
 
@@ -123,8 +123,10 @@ def seed():
                     """
                     MATCH (m:MetroStation {station_id: $metro_id})
                     MATCH (r:NationalRailStation {station_id: $rail_id})
-                    MERGE (m)-[:INTERCHANGE_TO]->(r)
-                    MERGE (r)-[:INTERCHANGE_TO]->(m)
+                    MERGE (m)-[mr:INTERCHANGE_TO]->(r)
+                    SET mr.travel_time_min = 5
+                    MERGE (r)-[rm:INTERCHANGE_TO]->(m)
+                    SET rm.travel_time_min = 5
                     """,
                     metro_id=s["station_id"],
                     rail_id=s["interchange_national_rail_station_id"],

@@ -79,11 +79,11 @@ def query_national_rail_availability(
                     d.stop_order AS destination_stop_order,
                     d.stop_order - o.stop_order AS stops_travelled,
                     d.travel_time_from_origin_min - o.travel_time_from_origin_min AS travel_time_min
-                FROM nr_schedules s
-                JOIN nr_schedule_stops o ON o.schedule_id = s.schedule_id
-                    AND o.station_id = %s AND o.is_express_skip = FALSE
-                JOIN nr_schedule_stops d ON d.schedule_id = s.schedule_id
-                    AND d.station_id = %s AND d.is_express_skip = FALSE
+                FROM national_rail_schedules s
+                JOIN national_rail_schedule_stops o ON o.schedule_id = s.schedule_id
+                    AND o.station_id = %s AND o.stop_type = 'stop'
+                JOIN national_rail_schedule_stops d ON d.schedule_id = s.schedule_id
+                    AND d.station_id = %s AND d.stop_type = 'stop'
                 JOIN national_rail_stations orig_s ON orig_s.station_id = %s
                 JOIN national_rail_stations dest_s ON dest_s.station_id = %s
                 WHERE d.stop_order > o.stop_order
@@ -103,7 +103,7 @@ def query_national_rail_availability(
                 cur.execute("""
                     SELECT fare_class, base_fare_usd, per_stop_rate_usd,
                            ROUND(base_fare_usd + per_stop_rate_usd * %s, 2) AS total_fare_usd
-                    FROM nr_fare_classes
+                    FROM national_rail_fare_classes
                     WHERE schedule_id = %s
                 """, (stops, sid))
                 sched["fares"] = [dict(r) for r in cur.fetchall()]
@@ -115,7 +115,7 @@ def query_national_rail_availability(
                             sl.fare_class,
                             COUNT(sl.seat_id) AS total_seats,
                             COUNT(b.seat_id)  AS booked_seats
-                        FROM seat_layouts sl
+                        FROM national_rail_seat_layouts sl
                         LEFT JOIN national_rail_bookings b
                             ON b.schedule_id = sl.schedule_id
                             AND b.seat_id    = sl.seat_id
@@ -127,6 +127,16 @@ def query_national_rail_availability(
                     """, (travel_date, sid))
                     sched["seat_availability"] = [dict(r) for r in cur.fetchall()]
                     sched["travel_date"] = travel_date
+
+            # Warn if travel_date is in the past
+            if travel_date:
+                try:
+                    td = datetime.fromisoformat(travel_date).date()
+                    if td < datetime.now(timezone.utc).date():
+                        for sched in schedules:
+                            sched["date_warning"] = "Travel date is in the past"
+                except ValueError:
+                    pass
 
             return schedules
 
@@ -145,7 +155,7 @@ def query_national_rail_fare(
                     base_fare_usd,
                     per_stop_rate_usd,
                     ROUND(base_fare_usd + per_stop_rate_usd * %s, 2) AS total_fare_usd
-                FROM nr_fare_classes
+                FROM national_rail_fare_classes
                 WHERE schedule_id = %s AND fare_class = %s
             """, (stops_travelled, schedule_id, fare_class))
             row = cur.fetchone()
@@ -215,8 +225,8 @@ def query_available_seats(
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT sl.seat_id, sl.coach, sl.row, sl.col AS column
-                FROM seat_layouts sl
+                SELECT sl.seat_id, sl.coach, sl.row_num AS row, sl.col_name AS column
+                FROM national_rail_seat_layouts sl
                 WHERE sl.schedule_id = %s
                   AND sl.fare_class  = %s
                   AND NOT EXISTS (
@@ -227,7 +237,7 @@ def query_available_seats(
                         AND b.travel_date  = %s
                         AND b.status NOT IN ('cancelled')
                   )
-                ORDER BY sl.row, sl.col
+                ORDER BY sl.row_num, sl.col_name
             """, (schedule_id, fare_class, travel_date))
             return [dict(r) for r in cur.fetchall()]
 
@@ -301,7 +311,7 @@ def query_user_bookings(user_email: str) -> dict:
                 FROM national_rail_bookings b
                 JOIN national_rail_stations orig ON orig.station_id = b.origin_station_id
                 JOIN national_rail_stations dest ON dest.station_id = b.destination_station_id
-                JOIN nr_schedules s ON s.schedule_id = b.schedule_id
+                JOIN national_rail_schedules s ON s.schedule_id = b.schedule_id
                 WHERE b.user_id = %s
                 ORDER BY b.travel_date DESC
             """, (user_id,))
@@ -339,7 +349,7 @@ def query_payment_info(booking_id: str) -> Optional[dict]:
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT payment_id, booking_id, amount_usd, method, status, paid_at
+                SELECT payment_id, booking_id, booking_type, amount_usd, method, status, paid_at
                 FROM payments
                 WHERE booking_id = %s
             """, (booking_id,))
@@ -368,12 +378,12 @@ def execute_booking(
             cur.execute("""
                 SELECT o.stop_order AS orig_order, d.stop_order AS dest_order,
                        s.first_train_time::text AS departure_time
-                FROM nr_schedule_stops o
-                JOIN nr_schedule_stops d ON d.schedule_id = o.schedule_id
-                JOIN nr_schedules s ON s.schedule_id = o.schedule_id
+                FROM national_rail_schedule_stops o
+                JOIN national_rail_schedule_stops d ON d.schedule_id = o.schedule_id
+                JOIN national_rail_schedules s ON s.schedule_id = o.schedule_id
                 WHERE o.schedule_id = %s
-                  AND o.station_id  = %s
-                  AND d.station_id  = %s
+                  AND o.station_id  = %s AND o.stop_type = 'stop'
+                  AND d.station_id  = %s AND d.stop_type = 'stop'
             """, (schedule_id, origin_station_id, destination_station_id))
             route = cur.fetchone()
             if not route:
@@ -384,7 +394,7 @@ def execute_booking(
             # Calculate fare
             cur.execute("""
                 SELECT ROUND(base_fare_usd + per_stop_rate_usd * %s, 2) AS amount_usd
-                FROM nr_fare_classes
+                FROM national_rail_fare_classes
                 WHERE schedule_id = %s AND fare_class = %s
             """, (stops_travelled, schedule_id, fare_class))
             fare_row = cur.fetchone()
@@ -401,7 +411,7 @@ def execute_booking(
                 coach = available[0]["coach"]
             else:
                 cur.execute("""
-                    SELECT coach FROM seat_layouts
+                    SELECT coach FROM national_rail_seat_layouts
                     WHERE schedule_id = %s AND seat_id = %s AND fare_class = %s
                 """, (schedule_id, seat_id, fare_class))
                 seat_row = cur.fetchone()
@@ -426,8 +436,8 @@ def execute_booking(
 
             payment_id = _gen_payment_id()
             cur.execute("""
-                INSERT INTO payments (payment_id, booking_id, amount_usd, method, status, paid_at)
-                VALUES (%s, %s, %s, 'credit_card', 'paid', %s)
+                INSERT INTO payments (payment_id, booking_id, booking_type, amount_usd, method, status, paid_at)
+                VALUES (%s, %s, 'rail', %s, 'credit_card', 'paid', %s)
             """, (payment_id, booking_id, amount_usd, now))
 
             conn.commit()
@@ -460,7 +470,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             cur.execute("""
                 SELECT b.*, s.service_type
                 FROM national_rail_bookings b
-                JOIN nr_schedules s ON s.schedule_id = b.schedule_id
+                JOIN national_rail_schedules s ON s.schedule_id = b.schedule_id
                 WHERE b.booking_id = %s AND b.user_id = %s
             """, (booking_id, user_id))
             booking = cur.fetchone()
@@ -475,10 +485,10 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             amount = float(booking["amount_usd"])
 
             if booking["service_type"] == "express":
-                if hours_until >= 24:
-                    refund_pct, policy = 1.0, "RF002: >24h — 100% refund"
+                if hours_until >= 48:
+                    refund_pct, policy = 1.0, "RF002: >48h — 100% refund"
                 elif hours_until >= 2:
-                    refund_pct, policy = 0.5, "RF002: 2–24h — 50% refund"
+                    refund_pct, policy = 0.5, "RF002: 2–48h — 50% refund"
                 else:
                     refund_pct, policy = 0.0, "RF002: <2h — no refund"
             else:
