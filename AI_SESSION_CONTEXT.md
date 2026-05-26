@@ -91,15 +91,18 @@ skeleton/seed_vectors.py
 > Source: `databases/relational/schema.sql`  
 > Loaded automatically by Docker from `databases/relational/schema.sql` on first start.  
 > To apply schema changes: `docker compose down -v && docker compose up -d`
+>
+> **Schema layout:** All relational and vector tables live in `schema1`. Credentials (Argon2id
+> hashes) are isolated in `schema2`. The `public` schema is not used.
 
 ### Users
 
 ```sql
-CREATE TABLE IF NOT EXISTS users (
+-- schema1.users — profile only, NO password column
+CREATE TABLE IF NOT EXISTS schema1.users (
     user_id         VARCHAR(10)  PRIMARY KEY,
     full_name       VARCHAR(100) NOT NULL,
     email           VARCHAR(150) NOT NULL UNIQUE,
-    password        VARCHAR(100) NOT NULL,       -- plaintext for now; Argon2id planned
     phone           VARCHAR(20),
     date_of_birth   DATE,
     secret_question TEXT,
@@ -107,12 +110,20 @@ CREATE TABLE IF NOT EXISTS users (
     registered_at   TIMESTAMPTZ  DEFAULT NOW(),
     is_active       BOOLEAN      DEFAULT TRUE
 );
+
+-- schema2.credentials — Argon2id hashes, isolated from schema1
+CREATE TABLE IF NOT EXISTS schema2.credentials (
+    id          SERIAL       PRIMARY KEY,
+    user_id     VARCHAR(20)  NOT NULL REFERENCES schema1.users(user_id),
+    stored_hash VARCHAR(255) NOT NULL,           -- Argon2id, ~97 chars; VARCHAR(255) is safe
+    created_at  TIMESTAMPTZ  DEFAULT NOW()
+);
 ```
 
 ### Metro
 
 ```sql
-CREATE TABLE IF NOT EXISTS metro_stations (
+CREATE TABLE IF NOT EXISTS schema1.metro_stations (
     station_id                           VARCHAR(10)  PRIMARY KEY,
     name                                 VARCHAR(100) NOT NULL,
     is_interchange_metro                 BOOLEAN      DEFAULT FALSE,
@@ -120,18 +131,18 @@ CREATE TABLE IF NOT EXISTS metro_stations (
     interchange_national_rail_station_id VARCHAR(10)  -- soft reference; NR stations inserted later
 );
 
-CREATE TABLE IF NOT EXISTS metro_station_lines (
-    station_id  VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id),
+CREATE TABLE IF NOT EXISTS schema1.metro_station_lines (
+    station_id  VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id),
     line        VARCHAR(5)  NOT NULL,
     PRIMARY KEY (station_id, line)
 );
 
-CREATE TABLE IF NOT EXISTS metro_schedules (
+CREATE TABLE IF NOT EXISTS schema1.metro_schedules (
     schedule_id             VARCHAR(20)  PRIMARY KEY,
     line                    VARCHAR(5)   NOT NULL,
     direction               VARCHAR(20)  NOT NULL,
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id),
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id),
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
     base_fare_usd           NUMERIC(6,2) NOT NULL,
@@ -139,15 +150,15 @@ CREATE TABLE IF NOT EXISTS metro_schedules (
     frequency_min           INTEGER      NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS metro_schedule_days (
-    schedule_id VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id),
+CREATE TABLE IF NOT EXISTS schema1.metro_schedule_days (
+    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.metro_schedules(schedule_id),
     day_of_week VARCHAR(5)  NOT NULL CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
-CREATE TABLE IF NOT EXISTS metro_schedule_stops (
-    schedule_id                 VARCHAR(20) NOT NULL REFERENCES metro_schedules(schedule_id),
-    station_id                  VARCHAR(10) NOT NULL REFERENCES metro_stations(station_id),
+CREATE TABLE IF NOT EXISTS schema1.metro_schedule_stops (
+    schedule_id                 VARCHAR(20) NOT NULL REFERENCES schema1.metro_schedules(schedule_id),
+    station_id                  VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id),
     stop_order                  INTEGER     NOT NULL,
     travel_time_from_origin_min INTEGER     NOT NULL,
     PRIMARY KEY (schedule_id, station_id)
@@ -157,7 +168,7 @@ CREATE TABLE IF NOT EXISTS metro_schedule_stops (
 ### National Rail
 
 ```sql
-CREATE TABLE IF NOT EXISTS national_rail_stations (
+CREATE TABLE IF NOT EXISTS schema1.national_rail_stations (
     station_id                   VARCHAR(10)  PRIMARY KEY,
     name                         VARCHAR(100) NOT NULL,
     is_interchange_national_rail BOOLEAN      DEFAULT FALSE,
@@ -165,33 +176,33 @@ CREATE TABLE IF NOT EXISTS national_rail_stations (
     interchange_metro_station_id VARCHAR(10)  -- soft reference to metro_stations
 );
 
-CREATE TABLE IF NOT EXISTS national_rail_station_lines (
-    station_id  VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id),
+CREATE TABLE IF NOT EXISTS schema1.national_rail_station_lines (
+    station_id  VARCHAR(10) NOT NULL REFERENCES schema1.national_rail_stations(station_id),
     line        VARCHAR(5)  NOT NULL,
     PRIMARY KEY (station_id, line)
 );
 
-CREATE TABLE IF NOT EXISTS national_rail_schedules (
+CREATE TABLE IF NOT EXISTS schema1.national_rail_schedules (
     schedule_id             VARCHAR(20)  PRIMARY KEY,
     line                    VARCHAR(5)   NOT NULL,
     service_type            VARCHAR(20)  NOT NULL,  -- 'normal' | 'express'
     direction               VARCHAR(20)  NOT NULL,
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
     frequency_min           INTEGER      NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS national_rail_schedule_days (
-    schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id),
+CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_days (
+    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
     day_of_week VARCHAR(5)  NOT NULL CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
-CREATE TABLE IF NOT EXISTS national_rail_schedule_stops (
-    schedule_id                 VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id),
-    station_id                  VARCHAR(10) NOT NULL REFERENCES national_rail_stations(station_id),
+CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_stops (
+    schedule_id                 VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
+    station_id                  VARCHAR(10) NOT NULL REFERENCES schema1.national_rail_stations(station_id),
     stop_order                  INTEGER     NOT NULL,
     travel_time_from_origin_min INTEGER     NOT NULL,
     stop_type                   VARCHAR(15) NOT NULL DEFAULT 'stop'
@@ -199,17 +210,17 @@ CREATE TABLE IF NOT EXISTS national_rail_schedule_stops (
     PRIMARY KEY (schedule_id, station_id)
 );
 
-CREATE TABLE IF NOT EXISTS national_rail_fare_classes (
-    schedule_id       VARCHAR(20)  NOT NULL REFERENCES national_rail_schedules(schedule_id),
+CREATE TABLE IF NOT EXISTS schema1.national_rail_fare_classes (
+    schedule_id       VARCHAR(20)  NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
     fare_class        VARCHAR(20)  NOT NULL,  -- 'standard' | 'first'
     base_fare_usd     NUMERIC(6,2) NOT NULL,
     per_stop_rate_usd NUMERIC(6,2) NOT NULL,
     PRIMARY KEY (schedule_id, fare_class)
 );
 
-CREATE TABLE IF NOT EXISTS national_rail_seat_layouts (
+CREATE TABLE IF NOT EXISTS schema1.national_rail_seat_layouts (
     layout_id   VARCHAR(10) NOT NULL,
-    schedule_id VARCHAR(20) NOT NULL REFERENCES national_rail_schedules(schedule_id),
+    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
     coach       VARCHAR(5)  NOT NULL,
     fare_class  VARCHAR(20) NOT NULL,
     seat_id     VARCHAR(10) NOT NULL,
@@ -222,12 +233,12 @@ CREATE TABLE IF NOT EXISTS national_rail_seat_layouts (
 ### Bookings & Travel History
 
 ```sql
-CREATE TABLE IF NOT EXISTS national_rail_bookings (
+CREATE TABLE IF NOT EXISTS schema1.national_rail_bookings (
     booking_id              VARCHAR(10)  PRIMARY KEY,   -- format: BK-XXXXXX (generated)
-    user_id                 VARCHAR(10)  NOT NULL REFERENCES users(user_id),
-    schedule_id             VARCHAR(20)  NOT NULL REFERENCES national_rail_schedules(schedule_id),
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES national_rail_stations(station_id),
+    user_id                 VARCHAR(10)  NOT NULL REFERENCES schema1.users(user_id),
+    schedule_id             VARCHAR(20)  NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
     travel_date             DATE         NOT NULL,
     departure_time          TIME         NOT NULL,
     ticket_type             VARCHAR(20)  NOT NULL,
@@ -241,12 +252,12 @@ CREATE TABLE IF NOT EXISTS national_rail_bookings (
     travelled_at            TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS metro_travels (
+CREATE TABLE IF NOT EXISTS schema1.metro_travels (
     trip_id                 VARCHAR(10)  PRIMARY KEY,
-    user_id                 VARCHAR(10)  NOT NULL REFERENCES users(user_id),
-    schedule_id             VARCHAR(20)  NOT NULL REFERENCES metro_schedules(schedule_id),
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES metro_stations(station_id),
+    user_id                 VARCHAR(10)  NOT NULL REFERENCES schema1.users(user_id),
+    schedule_id             VARCHAR(20)  NOT NULL REFERENCES schema1.metro_schedules(schedule_id),
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id),
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id),
     travel_date             DATE         NOT NULL,
     ticket_type             VARCHAR(20)  NOT NULL,  -- 'single' | 'day_pass'
     day_pass_ref            VARCHAR(10),            -- references another trip_id for day_pass legs
@@ -261,7 +272,7 @@ CREATE TABLE IF NOT EXISTS metro_travels (
 ### Payments & Feedback
 
 ```sql
-CREATE TABLE IF NOT EXISTS payments (
+CREATE TABLE IF NOT EXISTS schema1.payments (
     payment_id    VARCHAR(10)  PRIMARY KEY,   -- format: PM-XXXXXX (generated)
     booking_id    VARCHAR(10)  NOT NULL,       -- soft ref: BK* (rail) or MT* (metro) — no FK
     booking_type  VARCHAR(10)  NOT NULL CHECK (booking_type IN ('rail', 'metro')),
@@ -271,11 +282,11 @@ CREATE TABLE IF NOT EXISTS payments (
     paid_at       TIMESTAMPTZ
 );
 
-CREATE TABLE IF NOT EXISTS feedback (
+CREATE TABLE IF NOT EXISTS schema1.feedback (
     feedback_id   VARCHAR(10) PRIMARY KEY,
     booking_id    VARCHAR(10) NOT NULL,        -- soft ref: BK* or MT* — no FK
     booking_type  VARCHAR(10) NOT NULL CHECK (booking_type IN ('rail', 'metro')),
-    user_id       VARCHAR(10) NOT NULL REFERENCES users(user_id),
+    user_id       VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id),
     rating        SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
     comment       TEXT,
     submitted_at  TIMESTAMPTZ DEFAULT NOW()
@@ -285,11 +296,11 @@ CREATE TABLE IF NOT EXISTS feedback (
 ### Indexes
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_nr_bookings_user_date   ON national_rail_bookings (user_id, travel_date);
-CREATE INDEX IF NOT EXISTS idx_nr_bookings_seat        ON national_rail_bookings (schedule_id, travel_date, seat_id);
-CREATE INDEX IF NOT EXISTS idx_metro_travels_user_date ON metro_travels (user_id, travel_date);
-CREATE INDEX IF NOT EXISTS idx_payments_booking        ON payments (booking_id);
-CREATE INDEX IF NOT EXISTS idx_feedback_booking        ON feedback (booking_id);
+CREATE INDEX IF NOT EXISTS idx_nr_bookings_user_date   ON schema1.national_rail_bookings (user_id, travel_date);
+CREATE INDEX IF NOT EXISTS idx_nr_bookings_seat        ON schema1.national_rail_bookings (schedule_id, travel_date, seat_id);
+CREATE INDEX IF NOT EXISTS idx_metro_travels_user_date ON schema1.metro_travels (user_id, travel_date);
+CREATE INDEX IF NOT EXISTS idx_payments_booking        ON schema1.payments (booking_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_booking        ON schema1.feedback (booking_id);
 ```
 
 ### Vector (RAG) — do not modify
@@ -297,7 +308,7 @@ CREATE INDEX IF NOT EXISTS idx_feedback_booking        ON feedback (booking_id);
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE IF NOT EXISTS policy_documents (
+CREATE TABLE IF NOT EXISTS schema1.policy_documents (
     id          SERIAL       PRIMARY KEY,
     title       VARCHAR(200) NOT NULL,
     category    VARCHAR(50)  NOT NULL,
@@ -308,7 +319,7 @@ CREATE TABLE IF NOT EXISTS policy_documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding
-    ON policy_documents USING hnsw (embedding vector_cosine_ops);
+    ON schema1.policy_documents USING hnsw (embedding vector_cosine_ops);
 ```
 
 > **Gemini note:** If switching to Gemini, change `vector(768)` → `vector(3072)` in schema.sql,
@@ -458,14 +469,22 @@ def register_user(
     first_name: str,
     surname: str,
     year_of_birth: int,
-    password: str,                  # stored plaintext; Argon2id planned
+    password: str,                  # hashed with Argon2id before storing
     secret_question: str,
     secret_answer: str,
 ) -> tuple[bool, str]:
-    """Returns (True, user_id) or (False, error_message). user_id format: RU{N:02d}."""
+    """
+    Inserts profile into schema1.users, then Argon2id hash into schema2.credentials
+    (single transaction). Returns (True, user_id) or (False, error_message).
+    user_id format: RU{N:02d}.
+    """
 
 def login_user(email: str, password: str) -> Optional[dict]:
-    """Returns user dict with first_name/surname split from full_name, or None."""
+    """
+    JOINs schema1.users with schema2.credentials, calls ph.verify() to check hash.
+    Returns user dict with first_name/surname split from full_name (stored_hash
+    stripped before returning), or None on mismatch / inactive user.
+    """
 
 def get_user_secret_question(email: str) -> Optional[str]:
     """Returns the secret question string or None if email not found."""
@@ -477,7 +496,10 @@ def verify_secret_answer(email: str, answer: str) -> bool:
     """
 
 def update_password(email: str, new_password: str) -> bool:
-    """Returns True if a row was updated, False otherwise."""
+    """
+    Hashes new_password with Argon2id and updates schema2.credentials.
+    Returns True if a row was updated, False otherwise.
+    """
 
 # ── Vector / RAG ─────────────────────────────────────────────────────────────
 
@@ -690,26 +712,30 @@ internally and converts on retrieval — no ambiguity, no DST bugs.
 
 ---
 
-### D08 — Passwords stored as plaintext; Argon2id planned
+### D08 — Passwords hashed with Argon2id; credentials isolated in schema2
 
-**Decision:** `users.password` is `VARCHAR(100)` storing the raw password string.
-This is intentional for the current course phase.
+**Decision:** `schema1.users` has **no password column**. Passwords are hashed with Argon2id
+(`argon2-cffi` `PasswordHasher`, default params) and stored in `schema2.credentials.stored_hash VARCHAR(255)`.
 
-**Why (current state):** Simplifies authentication during development. The course focus is
-database design, not security engineering.
+**Why:** Plaintext storage is indefensible even in a course setting once the schema is being
+designed from scratch. Isolating credentials into a separate schema (`schema2`) limits blast
+radius — a compromised `schema1` read does not expose hashes.
 
-**Planned upgrade:** Hash with Argon2id before storing. When implementing:
-1. Add `argon2-cffi` to `requirements.txt`
-2. In `register_user`, replace `password` with `ph.hash(password)` (PasswordHasher)
-3. In `login_user`, replace `WHERE password = %s` with a fetch + `ph.verify(stored, input)`
-4. The column must widen — default argon2-cffi hashes are 97 chars, leaving only 3 chars
-   of headroom in the current `VARCHAR(100)`. Any increase in security parameters overflows it.
-   Use `VARCHAR(255)` (industry convention for password hash columns)
-5. Existing seeded passwords will need re-hashing or a migration script
+**Implementation:**
+- `register_user` — inserts profile into `schema1.users`, then `_ph.hash(password)` into
+  `schema2.credentials` in a single transaction.
+- `login_user` — `JOIN schema2.credentials c ON c.user_id = u.user_id`, then
+  `_ph.verify(row["stored_hash"], password)`; pops `stored_hash` before returning.
+- `update_password` — `UPDATE schema2.credentials SET stored_hash = %s WHERE user_id = (SELECT user_id FROM schema1.users WHERE email = %s)`
+- `seed_postgres.py` — `seed_users()` does a two-step insert: profile rows first, then
+  Argon2id hashes.
 
-**Do not implement this without team agreement** — it changes the auth flow in `skeleton/ui.py`
-(which calls `login_user` and `register_user` directly). Note: `skeleton/agent.py` does not
-handle login/register — those are wired in `ui.py`, which is Tier 2 Optional.
+**Hash size note:** Default argon2-cffi hashes are ~97 chars (`$argon2id$v=19$m=65536,t=3,p=4,...`).
+`VARCHAR(255)` provides ample headroom for parameter increases.
+
+**Implication:** Do not add a `password` column back to `schema1.users`. All auth must go
+through `schema2.credentials`. No search_path reliance — all SQL uses explicit `schema1.` /
+`schema2.` prefixes.
 
 ---
 
@@ -752,7 +778,7 @@ national_rail_stations → national_rail_station_lines
 metro_schedules → metro_schedule_days → metro_schedule_stops
 national_rail_schedules → national_rail_schedule_days → national_rail_schedule_stops → national_rail_fare_classes
 national_rail_seat_layouts
-users
+users (schema1.users profile + schema2.credentials Argon2id hash, one transaction)
 national_rail_bookings
 metro_travels
 payments → feedback
