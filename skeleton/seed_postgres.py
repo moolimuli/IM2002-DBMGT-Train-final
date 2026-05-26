@@ -15,7 +15,6 @@ import sys
 import psycopg2
 from psycopg2.extras import execute_values
 
-##nini fix
 from argon2 import PasswordHasher
 _ph = PasswordHasher()
 
@@ -86,19 +85,19 @@ def seed_metro_stations(cur):
         )
         for s in data
     ]
-    n = insert_many(cur, "metro_stations",
+    n = insert_many(cur, "schema1.metro_stations",
                     ["station_id", "name", "is_interchange_metro",
                      "is_interchange_national_rail", "interchange_national_rail_station_id"],
                     rows)
-    print(f"  metro_stations: {n} rows")
+    print(f"  schema1.metro_stations: {n} rows")
 
     # Lines per station (each station has a list of lines)
     line_rows = []
     for s in data:
         for line in s["lines"]:
             line_rows.append((s["station_id"], line))
-    n = insert_many(cur, "metro_station_lines", ["station_id", "line"], line_rows)
-    print(f"  metro_station_lines: {n} rows")
+    n = insert_many(cur, "schema1.metro_station_lines", ["station_id", "line"], line_rows)
+    print(f"  schema1.metro_station_lines: {n} rows")
 
 
 def seed_national_rail_stations(cur):
@@ -114,18 +113,18 @@ def seed_national_rail_stations(cur):
         )
         for s in data
     ]
-    n = insert_many(cur, "national_rail_stations",
+    n = insert_many(cur, "schema1.national_rail_stations",
                     ["station_id", "name", "is_interchange_national_rail",
                      "is_interchange_metro", "interchange_metro_station_id"],
                     rows)
-    print(f"  national_rail_stations: {n} rows")
+    print(f"  schema1.national_rail_stations: {n} rows")
 
     line_rows = []
     for s in data:
         for line in s["lines"]:
             line_rows.append((s["station_id"], line))
-    n = insert_many(cur, "national_rail_station_lines", ["station_id", "line"], line_rows)
-    print(f"  national_rail_station_lines: {n} rows")
+    n = insert_many(cur, "schema1.national_rail_station_lines", ["station_id", "line"], line_rows)
+    print(f"  schema1.national_rail_station_lines: {n} rows")
 
 
 def seed_metro_schedules(cur):
@@ -147,20 +146,20 @@ def seed_metro_schedules(cur):
         )
         for s in data
     ]
-    n = insert_many(cur, "metro_schedules",
+    n = insert_many(cur, "schema1.metro_schedules",
                     ["schedule_id", "line", "direction", "origin_station_id",
                      "destination_station_id", "first_train_time", "last_train_time",
                      "base_fare_usd", "per_stop_rate_usd", "frequency_min"],
                     rows)
-    print(f"  metro_schedules: {n} rows")
+    print(f"  schema1.metro_schedules: {n} rows")
 
     # Operating days
     day_rows = []
     for s in data:
         for day in s["operates_on"]:
             day_rows.append((s["schedule_id"], day))
-    n = insert_many(cur, "metro_schedule_days", ["schedule_id", "day_of_week"], day_rows)
-    print(f"  metro_schedule_days: {n} rows")
+    n = insert_many(cur, "schema1.metro_schedule_days", ["schedule_id", "day_of_week"], day_rows)
+    print(f"  schema1.metro_schedule_days: {n} rows")
 
     # Stops — stops_in_order gives the ordered list;
     # travel_time_from_origin_min gives the time for each station id.
@@ -174,11 +173,11 @@ def seed_metro_schedules(cur):
                 order,
                 times[station_id],
             ))
-    n = insert_many(cur, "metro_schedule_stops",
+    n = insert_many(cur, "schema1.metro_schedule_stops",
                     ["schedule_id", "station_id", "stop_order",
                      "travel_time_from_origin_min"],
                     stop_rows)
-    print(f"  metro_schedule_stops: {n} rows")
+    print(f"  schema1.metro_schedule_stops: {n} rows")
 
 
 def seed_national_rail_schedules(cur):
@@ -198,20 +197,20 @@ def seed_national_rail_schedules(cur):
         )
         for s in data
     ]
-    n = insert_many(cur, "national_rail_schedules",
+    n = insert_many(cur, "schema1.national_rail_schedules",
                     ["schedule_id", "line", "service_type", "direction",
                      "origin_station_id", "destination_station_id",
                      "first_train_time", "last_train_time", "frequency_min"],
                     rows)
-    print(f"  national_rail_schedules: {n} rows")
+    print(f"  schema1.national_rail_schedules: {n} rows")
 
     # Operating days
     day_rows = []
     for s in data:
         for day in s["operates_on"]:
             day_rows.append((s["schedule_id"], day))
-    n = insert_many(cur, "national_rail_schedule_days", ["schedule_id", "day_of_week"], day_rows)
-    print(f"  national_rail_schedule_days: {n} rows")
+    n = insert_many(cur, "schema1.national_rail_schedule_days", ["schedule_id", "day_of_week"], day_rows)
+    print(f"  schema1.national_rail_schedule_days: {n} rows")
 
     # Stops — express services also have "passed_through_stations" that are skipped
     stop_rows = []
@@ -235,11 +234,11 @@ def seed_national_rail_schedules(cur):
                 0,
                 'pass_through',
             ))
-    n = insert_many(cur, "national_rail_schedule_stops",
+    n = insert_many(cur, "schema1.national_rail_schedule_stops",
                     ["schedule_id", "station_id", "stop_order",
                      "travel_time_from_origin_min", "stop_type"],
                     stop_rows)
-    print(f"  national_rail_schedule_stops: {n} rows")
+    print(f"  schema1.national_rail_schedule_stops: {n} rows")
 
     # Fare classes
     fare_rows = []
@@ -251,10 +250,10 @@ def seed_national_rail_schedules(cur):
                 details["base_fare_usd"],
                 details["per_stop_rate_usd"],
             ))
-    n = insert_many(cur, "national_rail_fare_classes",
+    n = insert_many(cur, "schema1.national_rail_fare_classes",
                     ["schedule_id", "fare_class", "base_fare_usd", "per_stop_rate_usd"],
                     fare_rows)
-    print(f"  national_rail_fare_classes: {n} rows")
+    print(f"  schema1.national_rail_fare_classes: {n} rows")
 
 
 def seed_seat_layouts(cur):
@@ -273,22 +272,27 @@ def seed_seat_layouts(cur):
                     seat["row"],
                     seat["column"],
                 ))
-    n = insert_many(cur, "national_rail_seat_layouts",
+    n = insert_many(cur, "schema1.national_rail_seat_layouts",
                     ["layout_id", "schedule_id", "coach", "fare_class",
                      "seat_id", "row_num", "col_name"],
                     rows)
-    print(f"  national_rail_seat_layouts: {n} rows")
+    print(f"  schema1.national_rail_seat_layouts: {n} rows")
 
 
 def seed_users(cur):
+    """
+    Two-step insert:
+      1. schema1.users  — profile fields only (no password)
+      2. schema2.credentials — Argon2id hash of the plaintext password
+    """
     data = load("registered_users.json")
 
-    rows = [
+    # Step 1: profile rows (no password column)
+    user_rows = [
         (
             u["user_id"],
             u["full_name"],
             u["email"],
-            _ph.hash(u["password"]),
             u.get("phone"),
             u.get("date_of_birth"),
             u.get("secret_question"),
@@ -298,12 +302,22 @@ def seed_users(cur):
         )
         for u in data
     ]
-    n = insert_many(cur, "users",
-                    ["user_id", "full_name", "email", "password", "phone",
+    n = insert_many(cur, "schema1.users",
+                    ["user_id", "full_name", "email", "phone",
                      "date_of_birth", "secret_question", "secret_answer",
                      "registered_at", "is_active"],
-                    rows)
-    print(f"  users: {n} rows")
+                    user_rows)
+    print(f"  schema1.users: {n} rows")
+
+    # Step 2: Argon2id hashes
+    cred_rows = [
+        (u["user_id"], _ph.hash(u["password"]))
+        for u in data
+    ]
+    n = insert_many(cur, "schema2.credentials",
+                    ["user_id", "stored_hash"],
+                    cred_rows)
+    print(f"  schema2.credentials: {n} rows")
 
 
 def seed_national_rail_bookings(cur):
@@ -330,14 +344,14 @@ def seed_national_rail_bookings(cur):
         )
         for b in data
     ]
-    n = insert_many(cur, "national_rail_bookings",
+    n = insert_many(cur, "schema1.national_rail_bookings",
                     ["booking_id", "user_id", "schedule_id",
                      "origin_station_id", "destination_station_id",
                      "travel_date", "departure_time", "ticket_type", "fare_class",
                      "coach", "seat_id", "stops_travelled",
                      "amount_usd", "status", "booked_at", "travelled_at"],
                     rows)
-    print(f"  national_rail_bookings: {n} rows")
+    print(f"  schema1.national_rail_bookings: {n} rows")
 
 
 def seed_metro_travels(cur):
@@ -361,14 +375,14 @@ def seed_metro_travels(cur):
         )
         for t in data
     ]
-    n = insert_many(cur, "metro_travels",
+    n = insert_many(cur, "schema1.metro_travels",
                     ["trip_id", "user_id", "schedule_id",
                      "origin_station_id", "destination_station_id",
                      "travel_date", "ticket_type", "day_pass_ref",
                      "stops_travelled", "amount_usd", "status",
                      "purchased_at", "travelled_at"],
                     rows)
-    print(f"  metro_travels: {n} rows")
+    print(f"  schema1.metro_travels: {n} rows")
 
 
 def seed_payments(cur):
@@ -386,11 +400,11 @@ def seed_payments(cur):
         )
         for p in data
     ]
-    n = insert_many(cur, "payments",
+    n = insert_many(cur, "schema1.payments",
                     ["payment_id", "booking_id", "booking_type", "amount_usd",
                      "method", "status", "paid_at"],
                     rows)
-    print(f"  payments: {n} rows")
+    print(f"  schema1.payments: {n} rows")
 
 
 def seed_feedback(cur):
@@ -408,11 +422,11 @@ def seed_feedback(cur):
         )
         for f in data
     ]
-    n = insert_many(cur, "feedback",
+    n = insert_many(cur, "schema1.feedback",
                     ["feedback_id", "booking_id", "booking_type", "user_id",
                      "rating", "comment", "submitted_at"],
                     rows)
-    print(f"  feedback: {n} rows")
+    print(f"  schema1.feedback: {n} rows")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
@@ -433,6 +447,7 @@ def main():
         seed_national_rail_schedules(cur)
         seed_seat_layouts(cur)
         # Users must come before bookings/travels/feedback
+        # seed_users inserts into schema1.users AND schema2.credentials
         seed_users(cur)
         # Bookings depend on users, stations, schedules
         seed_national_rail_bookings(cur)
