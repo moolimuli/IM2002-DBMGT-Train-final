@@ -36,6 +36,8 @@ def _driver():
 
 def _rel_type(station_id: str) -> str:
     """Infer the relationship type from a station ID prefix."""
+    if station_id is None:
+        raise ValueError("station_id cannot be None")
     return "METRO_LINK" if station_id.startswith("MS") else "RAIL_LINK"
 
 

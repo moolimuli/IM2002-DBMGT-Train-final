@@ -607,6 +607,8 @@ def verify_secret_answer(email: str, answer: str) -> bool:
             row = cur.fetchone()
             if not row:
                 return False
+            if row[0] is None:
+                return False
             return row[0].strip().lower() == answer.strip().lower()
 
 
