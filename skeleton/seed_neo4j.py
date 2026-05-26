@@ -37,6 +37,15 @@ def seed():
         session.run("MATCH (n) DETACH DELETE n")
         print("  Cleared existing graph data")
 
+        cypher_path = os.path.normpath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "databases", "graph", "seed.cypher")
+        )
+        with open(cypher_path, encoding="utf-8") as f:
+            statements = [s.strip() for s in f.read().split(";") if s.strip() and not s.strip().startswith("//")]
+            for statement in statements:
+                session.run(statement)
+        print("  Applied seed.cypher constraints and indexes")
+
         # ── Metro station nodes ───────────────────────────────────────────
         for s in metro_stations:
             session.run(

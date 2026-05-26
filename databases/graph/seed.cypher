@@ -1,5 +1,10 @@
-// Deprecated: seeding is now done via skeleton/seed_neo4j.py
-// which loads data directly from train-mock-data/ JSON files.
-//
-// If you prefer Cypher-file seeding, implement your graph schema here.
-// Run with: python skeleton/seed_neo4j.py (or via the Neo4j Browser)
+// TransitFlow — Graph Schema Constraints & Indexes
+// Executed by seed_neo4j.py before data seeding
+
+// Uniqueness constraints
+CREATE CONSTRAINT IF NOT EXISTS FOR (n:MetroStation) REQUIRE n.station_id IS UNIQUE;
+CREATE CONSTRAINT IF NOT EXISTS FOR (n:NationalRailStation) REQUIRE n.station_id IS UNIQUE;
+
+// Indexes for fast lookup
+CREATE INDEX IF NOT EXISTS FOR (n:MetroStation) ON (n.station_id);
+CREATE INDEX IF NOT EXISTS FOR (n:NationalRailStation) ON (n.station_id);
