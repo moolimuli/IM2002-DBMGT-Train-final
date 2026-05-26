@@ -15,6 +15,10 @@ import sys
 import psycopg2
 from psycopg2.extras import execute_values
 
+##nini fix
+from argon2 import PasswordHasher
+_ph = PasswordHasher()
+
 # ── resolve paths ────────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -284,7 +288,7 @@ def seed_users(cur):
             u["user_id"],
             u["full_name"],
             u["email"],
-            u["password"],
+            _ph.hash(u["password"]),
             u.get("phone"),
             u.get("date_of_birth"),
             u.get("secret_question"),
