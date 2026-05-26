@@ -21,6 +21,34 @@ TransitFlow is a course AI chat assistant backed by three databases:
 **LLM:** Ollama (`llama3.1:8B` local) or Gemini (via `.env`).  
 **UI:** Gradio at `http://localhost:7860`.
 
+---
+
+## Coding Conventions
+
+- **Naming:** `snake_case` for all Python names and SQL identifiers
+- **Docstrings:** All functions must have a docstring with `Args:` and `Returns:` sections
+- **Return types:** Use type hints. Read-only functions return `list[dict]` or `Optional[dict]`
+- **Empty results:** Return `[]` or `None` (as documented), never raise an exception for "not found"
+- **SQL:** Use `%s` placeholders for all user inputs — never string-format into SQL
+- **Timestamps:** Always use `datetime.now(timezone.utc)`, never `datetime.now()`
+- **Nullable guards:** Always check `if value is None` before calling `.strip()` or any string operation
+- **Relational pattern:** Use `_connect()` helper + `psycopg2.extras.RealDictCursor`:
+```python
+  with _connect() as conn:
+      with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+          cur.execute("SELECT ...", (param,))
+          return [dict(row) for row in cur.fetchall()]
+```
+- **Graph pattern:** Use `_driver()` helper + session:
+```python
+  with _driver() as driver:
+      with driver.session() as session:
+          result = session.run("MATCH ...", station_id=station_id)
+          return [dict(record) for record in result]
+```
+
+---
+
 ### File editing rules (from README "Your Tasks")
 
 **Tier 1 — Required** (you must implement these):
