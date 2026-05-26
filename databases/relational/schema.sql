@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id         VARCHAR(10)  PRIMARY KEY,
     full_name       VARCHAR(100) NOT NULL,
     email           VARCHAR(150) NOT NULL UNIQUE,
-    password        VARCHAR(100) NOT NULL,
+    password        VARCHAR(255) NOT NULL,
     phone           VARCHAR(20),
     date_of_birth   DATE,
     secret_question TEXT,

@@ -22,6 +22,12 @@ import psycopg2.extras
 
 from skeleton.config import PG_DSN, VECTOR_TOP_K, VECTOR_SIMILARITY_THRESHOLD
 
+##nini 新增 
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+
+_ph = PasswordHasher()
+
 
 def _connect():
     """Return a new psycopg2 connection with autocommit enabled."""
@@ -526,7 +532,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
-
+##nini 新增：使用 Argon2id 進行密碼哈希和驗證，並新增密碼重置功能
 def register_user(
     email: str,
     first_name: str,
@@ -536,7 +542,7 @@ def register_user(
     secret_question: str,
     secret_answer: str,
 ) -> tuple[bool, str]:
-    """Register a new user."""
+    """Register a new user with Argon2id hashed password."""
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = False
     try:
@@ -552,14 +558,15 @@ def register_user(
             user_id = f"RU{count + 1:02d}"
 
             full_name = f"{first_name} {surname}"
-            dob = f"{year_of_birth}-01-01"  # approximate from year only
+            dob = f"{year_of_birth}-01-01"
+            hashed_password = _ph.hash(password)
 
             cur.execute("""
                 INSERT INTO users
                     (user_id, full_name, email, password, date_of_birth,
                      secret_question, secret_answer, registered_at, is_active)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-            """, (user_id, full_name, email, password, dob,
+            """, (user_id, full_name, email, hashed_password, dob,
                   secret_question, secret_answer, datetime.now(timezone.utc)))
             conn.commit()
             return True, user_id
@@ -569,21 +576,26 @@ def register_user(
     finally:
         conn.close()
 
-
+##nini 新增：使用 Argon2id 驗證用戶登入，並在成功後返回用戶資料（不包含密碼）
 def login_user(email: str, password: str) -> Optional[dict]:
-    """Verify credentials and return user dict on success."""
+    """Verify credentials using Argon2id and return user dict on success."""
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT user_id, email, full_name, phone, date_of_birth, is_active
+                SELECT user_id, email, full_name, phone, date_of_birth, is_active, password
                 FROM users
-                WHERE email = %s AND password = %s
-            """, (email, password))
+                WHERE email = %s AND is_active = TRUE
+            """, (email,))
             row = cur.fetchone()
             if not row:
                 return None
             result = dict(row)
-            # Derive first_name and surname from full_name
+            try:
+                _ph.verify(result["password"], password)
+            except (VerifyMismatchError, VerificationError, InvalidHashError):
+                return None
+            # 移除 password 欄位，不回傳給外部
+            result.pop("password")
             parts = result["full_name"].split(" ", 1)
             result["first_name"] = parts[0]
             result["surname"] = parts[1] if len(parts) > 1 else ""
@@ -611,16 +623,16 @@ def verify_secret_answer(email: str, answer: str) -> bool:
                 return False
             return row[0].strip().lower() == answer.strip().lower()
 
-
 def update_password(email: str, new_password: str) -> bool:
-    """Update the password for a user."""
+    """Update the password for a user using Argon2id hash."""
+    hashed = _ph.hash(new_password)
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE users SET password = %s WHERE email = %s
-            """, (new_password, email))
+            """, (hashed, email))
             conn.commit()
             return cur.rowcount > 0
     except Exception:
