@@ -789,6 +789,8 @@ Safe to re-run: all inserts use `ON CONFLICT DO NOTHING`.
 
 ### `skeleton/seed_neo4j.py`
 
+先讀取並執行 `databases/graph/seed.cypher`（constraints + indexes），再進行資料 seeding。
+
 Clears all graph data first (`MATCH (n) DETACH DELETE n`), then recreates:
 - MetroStation nodes (20)
 - NationalRailStation nodes (10)
@@ -841,4 +843,5 @@ python3 skeleton/seed_vectors.py
 - ✅ Argon2id password hashing (schema2.credentials)
 - ✅ Neo4j graph queries (6 functions)
 - ✅ pgvector RAG
+- ✅ seed.cypher constraints and indexes implemented
 - ❌ O1 退款計算 bug 未修
