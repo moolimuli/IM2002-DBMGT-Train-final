@@ -795,7 +795,24 @@ python3 skeleton/seed_vectors.py
 | # | Limitation | Location | Notes |
 |---|---|---|---|
 | L01 | Payment method always `'credit_card'` | `execute_booking` line ~440 | Schema supports debit_card/ewallet but function doesn't expose the choice. Extending requires adding a `payment_method` param and updating agent.py. |
-| L02 | Passwords stored plaintext | `users.password`, `register_user`, `login_user` | See D08. Argon2id upgrade planned. |
 | L03 | `user_id` generation uses `COUNT(*) + 1` | `register_user` | Not safe for concurrent registrations. Fine for single-user course demo. |
 | L04 | `stop_order = 0` convention for pass-through stations | `national_rail_schedule_stops` | Not enforced by constraint. Application code must filter `stop_type = 'stop'`. |
 | L05 | UI model list hardcoded to `llama3.2:1b` / `llama3.1:8b` (lowercase) | `skeleton/ui.py` line 67 | Model pulled as `llama3.1:8B` (uppercase) shows as `(not pulled)` in UI — cosmetic only, backend works correctly. |
+
+---
+
+## Known Bugs (Pending Fix)
+
+- **O1** `execute_cancellation` in `databases/relational/queries.py`:
+  departure time hardcoded to midnight instead of actual departure_time.
+  Causes wrong refund tier calculation. Fix: one-line change, no DB reset needed.
+
+---
+
+## Current Progress
+
+- ✅ PostgreSQL schema (schema1/schema2 split)
+- ✅ Argon2id password hashing (schema2.credentials)
+- ✅ Neo4j graph queries (6 functions)
+- ✅ pgvector RAG
+- ❌ O1 退款計算 bug 未修
