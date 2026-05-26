@@ -21,20 +21,36 @@ TransitFlow is a course AI chat assistant backed by three databases:
 **LLM:** Ollama (`llama3.1:8B` local) or Gemini (via `.env`).  
 **UI:** Gradio at `http://localhost:7860`.
 
-### Files you may edit
+### File editing rules (from README "Your Tasks")
+
+**Tier 1 — Required** (you must implement these):
 ```
 databases/relational/schema.sql
 databases/relational/queries.py
 databases/graph/queries.py
 skeleton/seed_postgres.py
 skeleton/seed_neo4j.py
-requirements.txt
+databases/graph/seed.cypher              ← listed by README but NOT executed in current implementation (see ⚠️ below)
+train-mock-data/refund_policy.json
+train-mock-data/ticket_types.json
+train-mock-data/booking_rules.json
+train-mock-data/travel_policies.json
 ```
 
-### Files you must NOT edit
+> ⚠️ **seed.cypher note:** README lists `databases/graph/seed.cypher` as a required file, but the
+> current implementation in `skeleton/seed_neo4j.py` writes Cypher directly in Python and never
+> loads `seed.cypher`. If you want to use seed.cypher, you must add a file-loading step to
+> `seed_neo4j.py`.
+
+**Tier 2 — Optional** (you may edit, but know what you're doing):
 ```
 skeleton/agent.py
 skeleton/ui.py
+```
+> README note: *"If you modify these files, make sure you understand what you are modifying."*
+
+**Tier 3 — Locked** (do NOT modify):
+```
 skeleton/llm_provider.py
 skeleton/config.py
 skeleton/seed_vectors.py
@@ -663,7 +679,9 @@ database design, not security engineering.
    Use `VARCHAR(255)` (industry convention for password hash columns)
 5. Existing seeded passwords will need re-hashing or a migration script
 
-**Do not implement this without team agreement** — it changes the auth flow in `agent.py`.
+**Do not implement this without team agreement** — it changes the auth flow in `skeleton/ui.py`
+(which calls `login_user` and `register_user` directly). Note: `skeleton/agent.py` does not
+handle login/register — those are wired in `ui.py`, which is Tier 2 Optional.
 
 ---
 
