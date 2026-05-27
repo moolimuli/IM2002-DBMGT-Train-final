@@ -344,6 +344,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
                 YIELD path
                 WITH last(nodes(path)) AS affected, length(path) AS hops_away
                 WITH affected, min(hops_away) AS hops_away
+                WHERE affected.station_id <> $station_id
                 RETURN affected.station_id  AS station_id,
                        affected.name        AS name,
                        hops_away,

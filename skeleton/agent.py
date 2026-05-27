@@ -54,6 +54,7 @@ from databases.graph.queries import (
     query_alternative_routes,
     query_interchange_path,
     query_delay_ripple,
+    query_station_connections,
 )
 
 
@@ -254,23 +255,41 @@ TOOLS = [
     },
     {
         "name": "find_alternative_routes",
-        "description": "Find routes that avoid a specific delayed or closed station.",
+        "description": (
+            "Find alternative metro or rail routes that avoid a specific station. "
+            "Use when the user asks for routes avoiding or bypassing a station, "
+            "or when a station is closed or disrupted. "
+            "Returns up to 3 alternative routes sorted by travel time."
+        ),
         "parameters": {
-            "origin_id":        {"type": "string", "description": "e.g. NR01"},
-            "destination_id":   {"type": "string", "description": "e.g. NR05"},
-            "avoid_station_id": {"type": "string", "description": "The station to avoid e.g. NR03"},
+            "origin_id":        {"type": "string", "description": "Station ID e.g. MS01 or NR01"},
+            "destination_id":   {"type": "string", "description": "Station ID e.g. MS09 or NR05"},
+            "avoid_station_id": {"type": "string", "description": "Station ID to avoid e.g. MS05"},
             "network":          {"type": "string", "description": "metro, rail, or auto"},
         },
         "required": ["origin_id", "destination_id", "avoid_station_id"],
     },
     {
+        "name": "get_station_connections",
+        "description": (
+            "Get all direct connections from a station — which stations it links to, "
+            "which lines serve it, and travel times to each neighbour. "
+            "Use when the user asks what stations are directly connected to a station, "
+            "or which lines serve a station."
+        ),
+        "parameters": {
+            "station_id": {"type": "string", "description": "Station ID e.g. MS01 or NR01"},
+        },
+        "required": ["station_id"],
+    },
+    {
         "name": "get_delay_ripple",
         "description": "Show which stations and lines are affected by a disruption or delay at a given station (within N hops).",
         "parameters": {
-            "station_id": {"type": "string", "description": "Station ID e.g. NR03 or MS07"},
-            "hops":       {"type": "integer", "description": "How many connections out to check (default 2)"},
+            "delayed_station_id": {"type": "string", "description": "Station ID of the delayed/disrupted station e.g. NR03 or MS07"},
+            "hops":               {"type": "integer", "description": "How many connections out to check (default 2)"},
         },
-        "required": ["station_id"],
+        "required": ["delayed_station_id"],
     },
 ]
 
@@ -286,7 +305,8 @@ cancel_booking(booking_id)
 get_user_bookings()
 search_policy(query)
 find_alternative_routes(origin_id, destination_id, avoid_station_id, network?)
-get_delay_ripple(station_id, hops?)"""
+get_station_connections(station_id)
+get_delay_ripple(delayed_station_id, hops?)"""
 
 
 # ── Agent logic ───────────────────────────────────────────────────────────────
@@ -430,9 +450,12 @@ def _execute_tool(
             )
             result = [{"route_number": i + 1, "legs": r} for i, r in enumerate(routes)]
 
+        elif tool_name == "get_station_connections":
+            result = query_station_connections(**params)
+
         elif tool_name == "get_delay_ripple":
             result = query_delay_ripple(
-                delayed_station_id=params["station_id"],
+                delayed_station_id=params["delayed_station_id"],
                 hops=params.get("hops", 2),
             )
 
