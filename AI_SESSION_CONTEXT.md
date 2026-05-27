@@ -4,7 +4,7 @@
 > instantly. It captures all agreed schema, function signatures, and design decisions
 > so a new session does not need to re-read the codebase from scratch.
 >
-> **Last updated:** 2026-05-26
+> **Last updated:** 2026-05-27
 
 ---
 
@@ -826,14 +826,45 @@ python3 skeleton/seed_vectors.py
 | L03 | `user_id` generation uses `COUNT(*) + 1` | `register_user` | Not safe for concurrent registrations. Fine for single-user course demo. |
 | L04 | `stop_order = 0` convention for pass-through stations | `national_rail_schedule_stops` | Not enforced by constraint. Application code must filter `stop_type = 'stop'`. |
 | L05 | UI model list hardcoded to `llama3.2:1b` / `llama3.1:8b` (lowercase) | `skeleton/ui.py` line 67 | Model pulled as `llama3.1:8B` (uppercase) shows as `(not pulled)` in UI — cosmetic only, backend works correctly. |
+| L06 | 8B 模型多步驟查詢失敗 | `skeleton/agent.py` | LLM 無法可靠串接多個 tool call，跨 DB 整合查詢（例如先查路線再訂票）結果不穩定。需要 13B+ 模型才能可靠執行。DB 層功能本身正確。 |
+| L07 | `query_cheapest_route` 票價為估算值 | `databases/graph/queries.py` | 用 hop count × $0.50 估算，非真實票價（實際票價差距可達 10 倍）。回傳結果的 `fare_note` 欄位已附警告。需呼叫 `check_national_rail_availability` 取得精確票價。 |
 
 ---
 
-## Known Bugs (Pending Fix)
+## Known Bugs
 
 - **O1** `execute_cancellation` in `databases/relational/queries.py`:
   departure time hardcoded to midnight instead of actual departure_time.
   Causes wrong refund tier calculation. Fix: one-line change, no DB reset needed.
+  *(Pending)*
+
+- **O2** ✅ FIXED — `query_delay_ripple` origin pollution: queried station appeared in its own
+  ripple results (with `hops_away=2`) due to cyclic paths in the graph.
+  Fixed by adding `WHERE affected.station_id <> $station_id` before the RETURN clause.
+  (`databases/graph/queries.py`)
+
+- **O3** ✅ FIXED — `find_alternative_routes` not registered in `agent.py`: LLM could select
+  the tool but it was silently dropped. Added tool definition to TOOLS, entry to TOOLS_SCHEMA,
+  and handler to `_execute_tool`. Import was already present.
+
+- **O4** ✅ FIXED — `get_station_connections` not registered in `agent.py`: same as O3.
+  Added `query_station_connections` import, tool definition, TOOLS_SCHEMA entry, and
+  `_execute_tool` handler.
+
+- **O5** ✅ FIXED — Fallback in `agent.py` overrode `find_alternative_routes` with `find_route`:
+  the route-trigger fallback fired even when LLM had correctly selected `find_alternative_routes`,
+  discarding the `avoid_station_id` parameter entirely.
+  Fixed by adding guard: `and not _tool_selected("find_alternative_routes", "origin_id", "destination_id", "avoid_station_id")`.
+
+- **O6** ✅ FIXED — `get_delay_ripple` tool parameter named `station_id` in TOOLS definition,
+  mismatched with `query_delay_ripple` function signature which uses `delayed_station_id`.
+  Renamed in TOOLS, TOOLS_SCHEMA, and `_execute_tool` handler.
+
+- **O7** ✅ FIXED — fastest/cheapest confusion in `find_route`: tool description did not clearly
+  map "fastest"/"quickest" → `optimise_by="time"` vs "cheapest" → `optimise_by="cost"`.
+  Updated `find_route` description and `optimise_by` parameter description.
+  Also added two SYSTEM_PROMPT rules: (1) logged-in user must never be told to log in again;
+  (2) if a tool returns empty/not-found, LLM must not invent data.
 
 ---
 
@@ -844,4 +875,9 @@ python3 skeleton/seed_vectors.py
 - ✅ Neo4j graph queries (6 functions)
 - ✅ pgvector RAG
 - ✅ seed.cypher constraints and indexes implemented
+- ✅ agent.py tool registration complete (find_alternative_routes, get_station_connections)
+- ✅ LLM prompt engineering fixes (fastest/cheapest, login hallucination, tool failure hallucination)
+- ✅ query_delay_ripple origin pollution fixed
+- ✅ fallback logic fixed for find_alternative_routes
+- ✅ 23/23 query unit tests passing
 - ❌ O1 退款計算 bug 未修
