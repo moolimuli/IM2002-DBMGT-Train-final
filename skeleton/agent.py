@@ -106,10 +106,11 @@ Networks: City Metro MS01-MS20 (lines M1-M4) | National Rail NR01-NR10 (lines NR
 Interchanges: Central=MS01/NR01 | Old Town=MS07/NR03 | Ferndale=MS15/NR07
 Today: {today}
 
-LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first.
+LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first. If the user IS logged in (their name and user_id appear in this prompt), never tell them to log in. Treat them as authenticated for make_booking and cancel_booking.
 
 When DATA FROM TRANSITFLOW DATABASE is provided, use it as the only source of truth. Do not contradict it or say a route was not found if the data shows one.
 For route results: list every station name in order, note any line changes, and give the total travel time.
+If a tool returns found: false, no results, or an empty list, say the information was not found. Never invent stations, routes, schedules, or prices that were not in the database results.
 Always reply in the same language as the user.
 """.format(today=date.today().isoformat())
 
@@ -243,13 +244,14 @@ TOOLS = [
             "Find the best route or path between two stations. Use for ANY question about "
             "directions, how to get from A to B, fastest route, quickest route, or shortest path. "
             "Works for metro-only, rail-only, or cross-network journeys. "
-            "Use optimise_by='time' for fastest/quickest, 'cost' for cheapest."
+            "IMPORTANT: if the user says 'fastest', 'quickest', or 'shortest time' use optimise_by='time'. "
+            "If the user says 'cheapest', 'lowest fare', or 'least expensive' use optimise_by='cost'."
         ),
         "parameters": {
             "origin_id":      {"type": "string", "description": "Station ID e.g. MS01 or NR01"},
             "destination_id": {"type": "string", "description": "Station ID e.g. MS09 or NR05"},
             "network":        {"type": "string", "description": "metro, rail, or auto (default auto — inferred from IDs)"},
-            "optimise_by":    {"type": "string", "description": "time (fastest, default) or cost (cheapest)"},
+            "optimise_by":    {"type": "string", "description": "time for fastest route (default), cost for cheapest route"},
         },
         "required": ["origin_id", "destination_id"],
     },
