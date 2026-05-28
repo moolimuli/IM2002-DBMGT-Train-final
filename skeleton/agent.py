@@ -121,10 +121,11 @@ TOOLS = [
     {
         "name": "check_national_rail_availability",
         "description": (
-            "Check available national rail trains and services between two stations. "
+            "Check available national rail trains between two stations. "
             "Use for any question about what trains run, schedules, timetables, or availability. "
-            "Returns schedules, service types, fare classes, and seat occupancy."
-        ),
+            "If user mentions a travel date, ALWAYS pass it as travel_date parameter. "
+            "Returns schedules, fares, and seat availability when travel_date is provided."
+),
         "parameters": {
             "origin_id":      {"type": "string", "description": "National rail station ID e.g. NR01"},
             "destination_id": {"type": "string", "description": "National rail station ID e.g. NR05"},
@@ -186,9 +187,10 @@ TOOLS = [
     {
         "name": "get_available_seats",
         "description": (
-            "Show available seats on a national rail service for a given date and fare class. "
-            "Always call this before making a first-class booking, or when the user wants to select a seat."
-        ),
+            "Show available seats on a national rail service. "
+            "REQUIRED parameters: schedule_id, travel_date, AND fare_class (standard or first). "
+            "Always call this before make_booking when user wants to select a specific seat."
+),
         "parameters": {
             "schedule_id":  {"type": "string", "description": "e.g. NR_SCH01"},
             "travel_date":  {"type": "string", "description": "YYYY-MM-DD"},
@@ -199,9 +201,10 @@ TOOLS = [
     {
         "name": "make_booking",
         "description": (
-            "Create a national rail booking for the logged-in user. "
-            "REQUIRES LOGIN. Only call after the user has explicitly confirmed all booking details. "
-            "Do NOT call this speculatively."
+            "USE THIS TOOL when the user explicitly says 'book', 'reserve', 'purchase', "
+            "or 'buy a ticket' and provides a schedule_id, origin, destination, date, and fare_class. "
+            "REQUIRES LOGIN. Only call after the user has confirmed all booking details. "
+            "Do NOT use check_national_rail_availability instead of this tool when user wants to book."
         ),
         "parameters": {
             "schedule_id":            {"type": "string", "description": "e.g. NR_SCH01"},
@@ -217,9 +220,10 @@ TOOLS = [
     {
         "name": "cancel_booking",
         "description": (
-            "Cancel a national rail booking for the logged-in user. "
-            "REQUIRES LOGIN. Only call after the user has explicitly confirmed the cancellation. "
-            "The refund amount is calculated automatically per the applicable policy."
+            "USE THIS TOOL when the user explicitly says 'cancel', 'cancel my booking', "
+            "or 'I want to cancel' and provides a booking_id (format: BK-XXXXXX or BK001 etc). "
+            "REQUIRES LOGIN. Do NOT use get_user_bookings instead of this tool. "
+            "Only call after the user has explicitly confirmed the cancellation."
         ),
         "parameters": {
             "booking_id": {"type": "string", "description": "Booking reference e.g. BK-A1B2C3"},
@@ -229,9 +233,12 @@ TOOLS = [
     {
         "name": "search_policy",
         "description": (
-            "Search company policy documents. Use for any question about: "
-            "refunds, delay compensation, luggage, bicycles, pets, food and drink, "
-            "conduct, booking rules, ticket types, fare evasion, or child fares."
+            "ALWAYS USE THIS TOOL for ANY question about: "
+            "delay compensation, refunds, cancellation policy, luggage, bicycles, pets, "
+            "food and drink, conduct, booking rules, ticket types, child fares, group discounts, "
+            "lost property, accessibility, or any policy/rule question. "
+            "Do NOT use check_national_rail_availability for policy questions. "
+            "Trigger words: 'compensation', 'refund', 'policy', 'entitled', 'rules', 'allowed'."
         ),
         "parameters": {
             "query": {"type": "string", "description": "Natural language question about policy"},
