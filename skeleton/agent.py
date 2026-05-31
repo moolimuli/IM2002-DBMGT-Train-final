@@ -406,15 +406,22 @@ def _execute_tool(
         elif tool_name == "search_policy":
             embedding = llm.embed(params["query"])
             docs = query_policy_vector_search(embedding)
+            # ── MODIFIED 2026-05-28 ─────────────────────────────────────────
+            # Increased content truncation from 800 to 2000 characters.
+            # 800 chars was too short for refund policies with multiple
+            # cancellation windows (RF001 has 4 windows; the 3rd and 4th
+            # were being cut off, causing the LLM to miss relevant rules).
+            # ────────────────────────────────────────────────────────────────
             result = [
                 {
                     "title":      d["title"],
                     "category":   d["category"],
-                    "content":    d["content"][:800],
+                    "content":    d["content"][:2000],
                     "similarity": round(d["similarity"], 3),
                 }
                 for d in docs
             ]
+            # ── END MODIFIED 2026-05-28 ─────────────────────────────────────
 
         elif tool_name == "find_route":
             origin_id      = params["origin_id"]
@@ -719,6 +726,77 @@ JSON:"""
         if any(kw in _lower for kw in _personal_triggers):
             _fallback("get_user_bookings", {}, "personal booking query")
 
+    """
+    ── ADDED 2026-05-28 ──────────────────────────────────────────────────────────
+    4. Policy / conduct / rules — override wrong-tool selections
+
+    Problem: The LLM routes policy questions (pets, luggage, bicycles, refunds,
+    etc.) to transit tools such as check_national_rail_availability when it sees
+    keywords like "national rail", returning empty results and causing the LLM
+    to fabricate incorrect answers (e.g. "dogs are not allowed").
+
+    Fix: detect policy-related keywords and force search_policy, overriding any
+    wrong tool the LLM may have already selected.
+
+    Fires when:
+      (a) no tool was selected, OR
+      (b) the LLM selected a non-policy tool for a clearly policy-type question
+    ─────────────────────────────────────────────────────────────────────────────
+    """
+    # 4. Policy / conduct / rules — override wrong-tool selections
+    # Fires when: (a) no tool selected, OR (b) wrong tool selected for a policy question
+    _POLICY_KEYWORDS = {
+        "refund", "cancel", "cancell", "policy", "policies", "rule", "rules",
+        "luggage", "bag", "suitcase", "baggage",
+        "bicycle", "bike", "cycling", "foldable",
+        "pet", "dog", "cat", "animal", "carrier",
+        "food", "drink", "alcohol", "eating", "smoking", "vaping",
+        "conduct", "noise", "priority seat", "wheelchair", "accessibility",
+        "delay compensation", "compensation",
+        # ── MODIFIED 2026-05-29: Added standalone "child", "children", "infant" ──
+        # Previously only "child fare" was listed, so "child aged 8" didn't match
+        # ─────────────────────────────────────────────────────────────────────────
+        "child", "children", "infant", "baby", "toddler",
+        "child fare", "group discount", "group fare", "group booking",
+        "ticket type", "day pass", "return ticket",
+        "allowed", "permit", "permitted", "bring", "allowed to", "can i bring",
+        "prohibited", "banned", "restriction",
+        "seat selection", "choose a seat", "select a seat", "pick a seat",
+        "pay extra", "extra fee", "extra charge", "surcharge", "additional fee",
+        "booking rule", "advance booking", "how early", "how far in advance",
+        "change fee", "change ticket", "modify booking",
+        "payment method", "credit card", "debit card", "ewallet",
+        "lost ticket", "ticket validity", "valid id",
+    }
+    _is_policy = any(kw in _lower for kw in _POLICY_KEYWORDS)
+    # ── MODIFIED 2026-05-29 ──────────────────────────────────────────────────
+    # Added get_metro_fare to the wrong-tool override list.
+    # Previously get_metro_fare was missing, causing "drink alcohol on metro"
+    # to be routed to fare lookup instead of search_policy.
+    #
+    # NOTE: get_user_bookings intentionally excluded from this list.
+    # Queries like "show my cancelled bookings" contain "cancel" (a policy
+    # keyword) but the user wants their booking history, not refund policy.
+    # Overriding get_user_bookings would break those legitimate relational
+    # queries.
+    # ──────────────────────────────────────────────────────────────────────────
+    _wrong_tool_for_policy = (
+        _is_policy and tool_calls and
+        tool_calls[0].get("name") in (
+            "check_national_rail_availability",
+            "check_metro_availability",
+            "find_route",
+            "get_national_rail_fare",
+            "get_metro_fare",
+            "calculate_metro_fare",
+        )
+    )
+    if _is_policy and (not tool_calls or _wrong_tool_for_policy):
+        _fallback("search_policy", {"query": user_message}, "policy keyword detected")
+    """
+    ── END ADDED 2026-05-28 ──────────────────────────────────────────────────────
+    """
+
     # Step 2: Execute each tool call against the real databases
     tool_results = []
     for call in tool_calls:
@@ -768,14 +846,53 @@ JSON:"""
             f"\n\nUser asks: {user_message}"
             f"\n\nAnswer using only the data above:"
         )
+    # ── MODIFIED 2026-05-28 ───────────────────────────────────────────────────
+    # Last-resort policy search: instead of immediately telling the user "no
+    # data found", try search_policy as a fallback. The vector similarity
+    # threshold (VECTOR_SIMILARITY_THRESHOLD in .env) filters out irrelevant
+    # results automatically — if nothing scores above the threshold, the list
+    # comes back empty, and we fall through to the "no data" message.
+    #
+    # This eliminates the need to enumerate every possible policy keyword:
+    # the vector DB itself decides whether the question is policy-related.
+    # ───────────────────────────────────────────────────────────────────────────
     elif any(kw in user_message.lower() for kw in _DB_KEYWORDS):
-        # No tool was called but the question needs DB data — prevent hallucination.
-        content = (
-            f"User asks: {user_message}\n\n"
-            "IMPORTANT: No data was retrieved from the TransitFlow database for this query. "
-            "Do NOT invent any bookings, fares, schedules, seat numbers, or travel times. "
-            "Tell the user no data was found."
+        # Try search_policy as last resort before giving up
+        if debug:
+            debug_info.append("**Last-resort:** no tool selected — trying search_policy as fallback")
+        _last_resort_json = _execute_tool(
+            "search_policy", {"query": user_message}, current_user_email
         )
+        import json as _json
+        _last_resort_results = _json.loads(_last_resort_json)
+        if isinstance(_last_resort_results, list) and len(_last_resort_results) > 0:
+            # Vector search found relevant documents — use them
+            tool_results.append({
+                "tool": "search_policy",
+                "params": {"query": user_message},
+                "result": _last_resort_json,
+                "summary": _last_resort_json,
+            })
+            data_block = "\n\n".join(
+                f"[{tr['tool']}]\n{_normalise_result(tr['tool'], tr['result'])}"
+                for tr in tool_results
+            )
+            if debug:
+                debug_info.append(f"**Last-resort found {len(_last_resort_results)} docs**")
+            content = (
+                f"DATA FROM TRANSITFLOW DATABASE:\n{data_block}"
+                f"\n\nUser asks: {user_message}"
+                f"\n\nAnswer using only the data above:"
+            )
+        else:
+            # Vector search also returned nothing — genuinely no data
+            content = (
+                f"User asks: {user_message}\n\n"
+                "IMPORTANT: No data was retrieved from the TransitFlow database for this query. "
+                "Do NOT invent any bookings, fares, schedules, seat numbers, or travel times. "
+                "Tell the user no data was found."
+            )
+    # ── END MODIFIED 2026-05-28 ─────────────────────────────────────────────
     else:
         content = user_message
 

@@ -1,6 +1,7 @@
 [
   {
     "policy_id": "RF001",
+    "_modified": "2026-05-28: Added explicit examples (e.g. ...) to all cancellation window conditions (W1-W4) to help LLM interpret boundary conditions correctly",
     "label": "National Rail – Normal Service – Single or Return",
     "applies_to": {
       "network_type": "national_rail",
@@ -11,7 +12,7 @@
       {
         "window_id": "RF001_W1",
         "label": "Early cancellation",
-        "condition": "Cancellation requested 48 or more hours before scheduled departure",
+        "condition": "Cancellation requested 48 or more hours before scheduled departure (e.g. cancelling 3 days, 2 days, or exactly 48 hours before departure)",
         "hours_before_departure_min": 48,
         "hours_before_departure_max": null,
         "refund_percent": 100,
@@ -20,7 +21,7 @@
       {
         "window_id": "RF001_W2",
         "label": "Standard cancellation",
-        "condition": "Cancellation requested between 24 and 48 hours before scheduled departure",
+        "condition": "Cancellation requested at least 24 hours but less than 48 hours before scheduled departure (e.g. cancelling 24, 30, or 36 hours before departure)",
         "hours_before_departure_min": 24,
         "hours_before_departure_max": 48,
         "refund_percent": 75,
@@ -29,7 +30,7 @@
       {
         "window_id": "RF001_W3",
         "label": "Late cancellation",
-        "condition": "Cancellation requested between 2 and 24 hours before scheduled departure",
+        "condition": "Cancellation requested at least 2 hours but less than 24 hours before scheduled departure (e.g. cancelling 2, 3, 5, 10, or 12 hours before departure all qualify for 50% refund)",
         "hours_before_departure_min": 2,
         "hours_before_departure_max": 24,
         "refund_percent": 50,
@@ -38,7 +39,7 @@
       {
         "window_id": "RF001_W4",
         "label": "No refund",
-        "condition": "Cancellation requested less than 2 hours before departure, or after departure time has passed",
+        "condition": "Cancellation requested less than 2 hours before departure, or after departure time has passed (e.g. cancelling 1 hour, 30 minutes, or 0 minutes before departure means no refund)",
         "hours_before_departure_min": 0,
         "hours_before_departure_max": 2,
         "refund_percent": 0,
@@ -50,6 +51,7 @@
   },
   {
     "policy_id": "RF002",
+    "_modified": "2026-05-28: Added explicit examples (e.g. ...) to all cancellation window conditions (W1-W3) to help LLM interpret boundary conditions correctly",
     "label": "National Rail – Express Service – Single or Return",
     "applies_to": {
       "network_type": "national_rail",
@@ -60,7 +62,7 @@
       {
         "window_id": "RF002_W1",
         "label": "Early cancellation",
-        "condition": "Cancellation requested 48 or more hours before scheduled departure",
+        "condition": "Cancellation requested 48 or more hours before scheduled departure (e.g. cancelling 3 days, 2 days, or exactly 48 hours before departure)",
         "hours_before_departure_min": 48,
         "hours_before_departure_max": null,
         "refund_percent": 100,
@@ -69,7 +71,7 @@
       {
         "window_id": "RF002_W2",
         "label": "Late cancellation",
-        "condition": "Cancellation requested between 24 and 48 hours before scheduled departure",
+        "condition": "Cancellation requested at least 24 hours but less than 48 hours before scheduled departure (e.g. cancelling 24, 30, or 36 hours before departure)",
         "hours_before_departure_min": 24,
         "hours_before_departure_max": 48,
         "refund_percent": 50,
@@ -78,7 +80,7 @@
       {
         "window_id": "RF002_W3",
         "label": "No refund",
-        "condition": "Cancellation requested less than 24 hours before departure, or after departure time has passed",
+        "condition": "Cancellation requested less than 24 hours before departure, or after departure time has passed (e.g. cancelling 12 hours, 1 hour, or 30 minutes before departure means no refund)",
         "hours_before_departure_min": 0,
         "hours_before_departure_max": 24,
         "refund_percent": 0,
