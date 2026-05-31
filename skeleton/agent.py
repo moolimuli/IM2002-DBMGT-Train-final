@@ -103,7 +103,10 @@ def _inject_station_ids(text: str) -> str:
 SYSTEM_PROMPT = """You are TransitFlow, a transit assistant for a dual-network system.
 
 Networks: City Metro MS01-MS20 (lines M1-M4) | National Rail NR01-NR10 (lines NR1-NR2)
-Interchanges: Central=MS01/NR01 | Old Town=MS07/NR03 | Ferndale=MS15/NR07
+###nini fix
+Interchanges: Central Square (MS01) ↔ Central Station (NR01) | Old Town (MS07, metro) ↔ Old Town Junction (NR03, rail) | Ferndale (MS15, metro) ↔ Ferndale Halt (NR07, rail)
+IMPORTANT: MS07 is Old Town metro station. NR03 is Old Town Junction rail station. They are different stations. When user says NR03, use NR03. When user says MS07, use MS07.
+###nini fix end
 Today: {today}
 
 LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first. If the user IS logged in (their name and user_id appear in this prompt), never tell them to log in. Treat them as authenticated for make_booking and cancel_booking.
@@ -119,13 +122,14 @@ Always reply in the same language as the user.
 
 TOOLS = [
     {
+        ###nini fix
         "name": "check_national_rail_availability",
         "description": (
             "Check available national rail trains between two stations. "
             "Use for any question about what trains run, schedules, timetables, or availability. "
             "If user mentions a travel date, ALWAYS pass it as travel_date parameter. "
             "Returns schedules, fares, and seat availability when travel_date is provided."
-),
+),      ###nini fix end
         "parameters": {
             "origin_id":      {"type": "string", "description": "National rail station ID e.g. NR01"},
             "destination_id": {"type": "string", "description": "National rail station ID e.g. NR05"},
@@ -184,13 +188,14 @@ TOOLS = [
         "parameters": {},
         "required": [],
     },
-    {
+    {      
+        ###nini fix
         "name": "get_available_seats",
         "description": (
             "Show available seats on a national rail service. "
             "REQUIRED parameters: schedule_id, travel_date, AND fare_class (standard or first). "
             "Always call this before make_booking when user wants to select a specific seat."
-),
+),      ###nini fix end
         "parameters": {
             "schedule_id":  {"type": "string", "description": "e.g. NR_SCH01"},
             "travel_date":  {"type": "string", "description": "YYYY-MM-DD"},
@@ -199,25 +204,29 @@ TOOLS = [
         "required": ["schedule_id", "travel_date", "fare_class"],
     },
     {
+        #nini fix
         "name": "make_booking",
         "description": (
             "USE THIS TOOL when the user explicitly says 'book', 'reserve', 'purchase', "
             "or 'buy a ticket' and provides a schedule_id, origin, destination, date, and fare_class. "
             "REQUIRES LOGIN. Only call after the user has confirmed all booking details. "
-            "Do NOT use check_national_rail_availability instead of this tool when user wants to book."
-        ),
+            "Do NOT call this speculatively. Do NOT use check_national_rail_availability instead."
+        ), ###nini fix end
         "parameters": {
             "schedule_id":            {"type": "string", "description": "e.g. NR_SCH01"},
             "origin_station_id":      {"type": "string", "description": "e.g. NR01"},
             "destination_station_id": {"type": "string", "description": "e.g. NR05"},
             "travel_date":            {"type": "string", "description": "YYYY-MM-DD"},
             "fare_class":             {"type": "string", "description": "standard or first"},
-            "seat_id":                {"type": "string", "description": "Specific seat ID (e.g. B05) or 'any' for auto-assign"},
+            ###nini fix
+            "seat_id": {"type": "string", "description": "Specific seat ID (e.g. B05) or 'any' for auto-assign. DEFAULT: use 'any' if user does not specify a seat."},
+            ###nini fix end
             "ticket_type":            {"type": "string", "description": "single or return (default single)"},
         },
         "required": ["schedule_id", "origin_station_id", "destination_station_id", "travel_date", "fare_class", "seat_id"],
     },
     {
+        ###nini fix
         "name": "cancel_booking",
         "description": (
             "USE THIS TOOL when the user explicitly says 'cancel', 'cancel my booking', "
@@ -231,15 +240,16 @@ TOOLS = [
         "required": ["booking_id"],
     },
     {
+        ###nini fix
         "name": "search_policy",
         "description": (
-            "ALWAYS USE THIS TOOL for ANY question about: "
-            "delay compensation, refunds, cancellation policy, luggage, bicycles, pets, "
-            "food and drink, conduct, booking rules, ticket types, child fares, group discounts, "
-            "lost property, accessibility, or any policy/rule question. "
-            "Do NOT use check_national_rail_availability for policy questions. "
-            "Trigger words: 'compensation', 'refund', 'policy', 'entitled', 'rules', 'allowed'."
-        ),
+            "ALWAYS USE THIS TOOL for ANY question about compensation, refunds, or policies. "
+            "USE THIS when user asks what they are 'entitled to', about 'compensation' for delays, "
+            "or about 'policy' for luggage, bicycles, pets, food, conduct, booking rules, ticket types, "
+            "child fares, group discounts, lost property, or accessibility. "
+            "Do NOT use get_delay_ripple for compensation questions. "
+            "Trigger words: 'compensation', 'entitled', 'refund', 'policy', 'rules', 'allowed', 'delayed'."
+),      ###nini fix end
         "parameters": {
             "query": {"type": "string", "description": "Natural language question about policy"},
         },
@@ -263,13 +273,14 @@ TOOLS = [
         "required": ["origin_id", "destination_id"],
     },
     {
+        ###nini fix
         "name": "find_alternative_routes",
         "description": (
-            "Find alternative metro or rail routes that avoid a specific station. "
-            "Use when the user asks for routes avoiding or bypassing a station, "
-            "or when a station is closed or disrupted. "
-            "Returns up to 3 alternative routes sorted by travel time."
-        ),
+            "USE THIS TOOL when the user asks about alternative routes or paths that AVOID a specific "
+            "station. Trigger words: 'closed', 'avoid', 'alternative', 'if X is closed', 'without going through'. "
+            "REQUIRED: origin_id, destination_id, AND avoid_station_id. "
+            "Do NOT use find_route or check_national_rail_availability for this type of question."
+        ),   ###nini fix end
         "parameters": {
             "origin_id":        {"type": "string", "description": "Station ID e.g. MS01 or NR01"},
             "destination_id":   {"type": "string", "description": "Station ID e.g. MS09 or NR05"},
@@ -292,8 +303,10 @@ TOOLS = [
         "required": ["station_id"],
     },
     {
+        ###nini fix
         "name": "get_delay_ripple",
-        "description": "Show which stations and lines are affected by a disruption or delay at a given station (within N hops).",
+        "description": "Show which STATIONS are affected by a disruption at a specific station ID. Use ONLY when user asks which stations are impacted, NOT for compensation or refund questions.",
+        ###nini fix end
         "parameters": {
             "delayed_station_id": {"type": "string", "description": "Station ID of the delayed/disrupted station e.g. NR03 or MS07"},
             "hops":               {"type": "integer", "description": "How many connections out to check (default 2)"},
@@ -309,7 +322,10 @@ get_national_rail_fare(schedule_id, fare_class, stops_travelled)
 check_metro_availability(origin_id, destination_id)
 calculate_metro_fare(schedule_id, stops_travelled)
 get_available_seats(schedule_id, travel_date, fare_class)
-make_booking(schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, ticket_type?)
+
+#nini fix
+make_booking(schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, ticket_type?)  # USE when user says book/reserve/buy ticket
+###nini fix end
 cancel_booking(booking_id)
 get_user_bookings()
 search_policy(query)
@@ -732,11 +748,24 @@ JSON:"""
         tool_name = call.get("name", "")
         params    = call.get("params") or call.get("parameters", {})
 
-        # Skip calls with empty string values — LLM failed to extract params
-        if any(v == "" for v in params.values()):
+         ### nini fix: Skip calls with empty string values for REQUIRED params only
+        _required = {
+            "find_route": ["origin_id", "destination_id"],
+            "find_alternative_routes": ["origin_id", "destination_id", "avoid_station_id"],
+            "check_national_rail_availability": ["origin_id", "destination_id"],
+            "check_metro_availability": ["origin_id", "destination_id"],
+            "make_booking": ["schedule_id", "origin_station_id", "destination_station_id", "travel_date", "fare_class"],
+            "cancel_booking": ["booking_id"],
+            "get_available_seats": ["schedule_id", "travel_date", "fare_class"],
+            "search_policy": ["query"],
+        }
+        _req_keys = _required.get(tool_name, list(params.keys()))
+        _empty = [k for k in _req_keys if params.get(k, None) == ""]
+        if _empty:
             if debug:
-                debug_info.append(f"**Skipped** `{tool_name}` — empty params: {params}")
+                debug_info.append(f"**Skipped** `{tool_name}` — empty required params: {_empty}")
             continue
+        ###nini fix end
 
         if debug:
             debug_info.append(f"**Calling:** `{tool_name}({params})`")
