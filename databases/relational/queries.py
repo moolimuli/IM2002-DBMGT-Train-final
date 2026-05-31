@@ -597,7 +597,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
                 return False, "Booking is already cancelled."
 
             # Calculate refund based on hours until travel
-            travel_dt = datetime.combine(booking["travel_date"], datetime.min.time()).replace(tzinfo=timezone.utc)
+            travel_dt = datetime.combine(booking["travel_date"], booking["departure_time"]).replace(tzinfo=timezone.utc)
             hours_until = (travel_dt - datetime.now(timezone.utc)).total_seconds() / 3600
             amount = float(booking["amount_usd"])
 
