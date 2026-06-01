@@ -99,14 +99,12 @@ def _inject_station_ids(text: str) -> str:
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
-
+###nini fix
 SYSTEM_PROMPT = """You are TransitFlow, a transit assistant for a dual-network system.
 
 Networks: City Metro MS01-MS20 (lines M1-M4) | National Rail NR01-NR10 (lines NR1-NR2)
-###nini fix
 Interchanges: Central Square (MS01) ↔ Central Station (NR01) | Old Town (MS07, metro) ↔ Old Town Junction (NR03, rail) | Ferndale (MS15, metro) ↔ Ferndale Halt (NR07, rail)
 IMPORTANT: MS07 is Old Town metro station. NR03 is Old Town Junction rail station. They are different stations. When user says NR03, use NR03. When user says MS07, use MS07.
-###nini fix end
 Today: {today}
 
 LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all users. Only make_booking and cancel_booking need login — if the user tries to book or cancel and is not logged in, tell them to log in first. If the user IS logged in (their name and user_id appear in this prompt), never tell them to log in. Treat them as authenticated for make_booking and cancel_booking.
@@ -116,7 +114,7 @@ For route results: list every station name in order, note any line changes, and 
 If a tool returns found: false, no results, or an empty list, say the information was not found. Never invent stations, routes, schedules, or prices that were not in the database results.
 Always reply in the same language as the user.
 """.format(today=date.today().isoformat())
-
+###nini fix end
 
 # ── Tool definitions (sent to the LLM to decide which to call) ────────────────
 
@@ -314,7 +312,7 @@ TOOLS = [
         "required": ["delayed_station_id"],
     },
 ]
-
+#nini fix
 TOOLS_SCHEMA = """\
 find_route(origin_id, destination_id, optimise_by?)
 check_national_rail_availability(origin_id, destination_id, travel_date?)
@@ -322,17 +320,14 @@ get_national_rail_fare(schedule_id, fare_class, stops_travelled)
 check_metro_availability(origin_id, destination_id)
 calculate_metro_fare(schedule_id, stops_travelled)
 get_available_seats(schedule_id, travel_date, fare_class)
-
-#nini fix
 make_booking(schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, ticket_type?)  # USE when user says book/reserve/buy ticket
-###nini fix end
 cancel_booking(booking_id)
 get_user_bookings()
 search_policy(query)
 find_alternative_routes(origin_id, destination_id, avoid_station_id, network?)
 get_station_connections(station_id)
 get_delay_ripple(delayed_station_id, hops?)"""
-
+###nini fix end
 
 # ── Agent logic ───────────────────────────────────────────────────────────────
 
