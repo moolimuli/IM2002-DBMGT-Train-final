@@ -332,7 +332,9 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
         List of dicts: {station_id, name, hops_away, lines_affected}
         When hops=0, returns only the delayed station itself.
     """
-    # Special case: hops=0 returns only the starting station
+    # hops=0 is a special case: return only the origin station itself (hops_away=0).
+    # The main Cypher query uses minLevel:1, so it would return an empty list for hops=0,
+    # which contradicts the expected behaviour of "returns the delayed station itself".
     if hops == 0:
         with _driver() as driver:
             with driver.session() as session:
