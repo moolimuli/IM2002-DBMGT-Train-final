@@ -828,6 +828,7 @@ python3 skeleton/seed_vectors.py
 | L05 | UI model list hardcoded to `llama3.2:1b` / `llama3.1:8b` (lowercase) | `skeleton/ui.py` line 67 | Model pulled as `llama3.1:8B` (uppercase) shows as `(not pulled)` in UI — cosmetic only, backend works correctly. |
 | L06 | 8B 模型多步驟查詢失敗 | `skeleton/agent.py` | LLM 無法可靠串接多個 tool call，跨 DB 整合查詢（例如先查路線再訂票）結果不穩定。需要 13B+ 模型才能可靠執行。DB 層功能本身正確。 |
 | L07 | `query_cheapest_route` 票價為估算值 | `databases/graph/queries.py` | 用 hop count × $0.50 估算，非真實票價（實際票價差距可達 10 倍）。回傳結果的 `fare_note` 欄位已附警告。需呼叫 `check_national_rail_availability` 取得精確票價。 |
+| L08 | 1b 模型無法穩定呼叫 `make_booking` / `cancel_booking` | `skeleton/agent.py` | 1b 模型工具選擇能力不足，8b 可正確執行。DB 層功能本身正確。 |
 
 ---
 

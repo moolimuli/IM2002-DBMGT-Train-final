@@ -342,6 +342,7 @@ def query_user_profile(user_email: str) -> Optional[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT user_id, full_name, email, phone, date_of_birth,
+                       EXTRACT(YEAR FROM date_of_birth)::int AS year_of_birth,
                        registered_at, is_active
                 FROM schema1.users
                 WHERE email = %s
