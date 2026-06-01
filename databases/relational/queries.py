@@ -338,16 +338,19 @@ def query_user_profile(user_email: str) -> Optional[dict]:
     Returns:
         Dict with user profile fields, or None if not found.
     """
+    ###nini fix
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT user_id, full_name, email, phone, date_of_birth,
+                       EXTRACT(YEAR FROM date_of_birth)::int AS year_of_birth,
                        registered_at, is_active
                 FROM schema1.users
                 WHERE email = %s
             """, (user_email,))
             row = cur.fetchone()
             return dict(row) if row else None
+            ###nini fix end
 
 
 def query_user_bookings(user_email: str) -> dict:

@@ -1,7 +1,6 @@
 # TransitFlow — Intelligent Rail Assistant
-hahahahaha
-> **Course starter project** — your job is to build the databases that power this AI assistant.
-> The AI pipeline, web interface, and database connections are already wired up and working.
+
+## For marking schemes and what to submit for your final project, please refer to [https://github.com/NCUIM-Lab710-Teaching/IM2002-grading-students/](https://github.com/NCUIM-Lab710-Teaching/IM2002-grading-students/tree/main).
 
 ---
 
@@ -240,7 +239,7 @@ The key benefit: it finds the right policy even if the user's wording is complet
 ### 1. Clone the repository, create a virtual environment, and install Python packages
 
 ```bash
-git clone https://github.com/NCUIM-Lab710-Teaching/IM2002-DBMGT-Train-v2 transitflow
+git clone https://github.com/NCUIM-Lab710-Teaching/IM2002-DBMGT-Train-final transitflow
 cd transitflow
 ```
 
@@ -1347,3 +1346,4 @@ python skeleton/seed_vectors.py
 - Any locally generated data exports or dump files.
 
 Before pushing, run `git status` and `git diff --staged` to confirm you are only committing files from `databases/`.
+hahahahah
