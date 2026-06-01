@@ -133,5 +133,44 @@
     ],
     "smoking_and_vaping": "Strictly prohibited on all train carriages and at all station platforms.",
     "conduct": "Passengers behaving in a manner that causes distress or danger to other passengers or staff may be removed from the train. In serious cases, the operator reserves the right to involve law enforcement."
+  },
+  "_added": "2026-05-29: Added lost_property and expanded accessibility sections to support more policy queries via vector search",
+  "lost_property": {
+    "metro": {
+      "reporting": "Lost property found on metro trains or platforms should be handed to station staff immediately.",
+      "collection": "Items are held at the nearest staffed station for 24 hours, then transferred to the Central Square (MS01) lost property office.",
+      "retention_period_days": 30,
+      "how_to_report": "Report lost items via the app under 'Help → Lost Property', or speak to any station staff member.",
+      "valuable_items": "Wallets, phones, keys, and travel documents are logged individually. Passengers will be contacted if found.",
+      "unclaimed_items": "Unclaimed items are donated to charity or disposed of after 30 days."
+    },
+    "national_rail": {
+      "reporting": "Lost property found on national rail services should be reported to the train manager or platform staff.",
+      "collection": "Items are held at the destination station for 48 hours, then transferred to the Central Station (NR01) lost property office.",
+      "retention_period_days": 60,
+      "how_to_report": "Report via the app under 'Help → Lost Property', by email, or in person at any staffed station.",
+      "valuable_items": "High-value items (electronics, jewellery, documents) are stored securely and logged with a reference number.",
+      "unclaimed_items": "Unclaimed items are held for 60 days before disposal or donation.",
+      "liability": "The operator is not liable for lost, stolen, or damaged personal belongings on any service."
+    }
+  },
+  "accessibility": {
+    "metro": {
+      "wheelchair_access": "All metro stations are step-free accessible. Lifts are available at all interchange stations.",
+      "assisted_boarding": "Staff are available at all staffed stations to assist passengers with mobility difficulties.",
+      "priority_boarding": "Passengers using wheelchairs or mobility aids may board first. Please inform staff on the platform.",
+      "audio_visual": "All metro trains have audio announcements and visual displays showing the next station.",
+      "guide_dogs": "Guide dogs and registered assistance animals are permitted on all metro services at all times.",
+      "contact": "Passengers requiring special assistance should contact customer service at least 2 hours before travel."
+    },
+    "national_rail": {
+      "wheelchair_access": "All national rail stations are wheelchair accessible. Ramps are available on request from platform staff.",
+      "assisted_boarding": "Passengers requiring assistance should contact customer service at least 24 hours before travel to arrange support.",
+      "priority_boarding": "Passengers with mobility difficulties are welcome to board first. Please inform platform staff.",
+      "wheelchair_spaces": "Each national rail train has 2 dedicated wheelchair spaces per carriage, available on a first-come basis.",
+      "hearing_loops": "All staffed ticket counters are equipped with hearing loops.",
+      "large_print": "Timetables and policy documents are available in large print on request.",
+      "contact": "Call our accessibility helpline or use the in-app chat for assistance planning your journey."
+    }
   }
 }

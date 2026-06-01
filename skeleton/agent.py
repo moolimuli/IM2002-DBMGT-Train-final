@@ -790,6 +790,10 @@ JSON:"""
         "change fee", "change ticket", "modify booking",
         "payment method", "credit card", "debit card", "ewallet",
         "lost ticket", "ticket validity", "valid id",
+        # ── ADDED 2026-05-29: lost property and accessibility keywords ───────
+        "lost property", "lost item", "left my", "report lost", "found item",
+        "hearing loop", "large print", "wheelchair space",
+        # ─────────────────────────────────────────────────────────────────────
     }
     _is_policy = any(kw in _lower for kw in _POLICY_KEYWORDS)
     # ── MODIFIED 2026-05-29 ──────────────────────────────────────────────────
@@ -797,14 +801,19 @@ JSON:"""
     # Previously get_metro_fare was missing, causing "drink alcohol on metro"
     # to be routed to fare lookup instead of search_policy.
     #
-    # NOTE: get_user_bookings intentionally excluded from this list.
-    # Queries like "show my cancelled bookings" contain "cancel" (a policy
-    # keyword) but the user wants their booking history, not refund policy.
-    # Overriding get_user_bookings would break those legitimate relational
-    # queries.
+    # get_user_bookings is included in the override list BUT protected by
+    # _is_personal_query: if the user says "my booking", "my ticket", etc.,
+    # the override is skipped so personal booking queries still work.
+    # This prevents "I left my phone on the metro" from calling
+    # get_user_bookings (which errors when not logged in).
     # ──────────────────────────────────────────────────────────────────────────
+    _personal_booking_kw = {"my booking", "my ticket", "my trip", "my journey",
+                            "my history", "my reservation", "show booking",
+                            "view booking", "check booking", "list booking",
+                            "show my", "view my"}
+    _is_personal_query = any(kw in _lower for kw in _personal_booking_kw)
     _wrong_tool_for_policy = (
-        _is_policy and tool_calls and
+        _is_policy and not _is_personal_query and tool_calls and
         tool_calls[0].get("name") in (
             "check_national_rail_availability",
             "check_metro_availability",
@@ -812,6 +821,7 @@ JSON:"""
             "get_national_rail_fare",
             "get_metro_fare",
             "calculate_metro_fare",
+            "get_user_bookings",
         )
     )
     if _is_policy and (not tool_calls or _wrong_tool_for_policy):
