@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS schema1.metro_stations (
 
 -- Lines served by each metro station (one row per line)
 CREATE TABLE IF NOT EXISTS schema1.metro_station_lines (
-    station_id  VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id),
+    station_id  VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE CASCADE,
     line        VARCHAR(5)  NOT NULL,
     PRIMARY KEY (station_id, line)
 );
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS schema1.metro_schedules (
     schedule_id             VARCHAR(20)   PRIMARY KEY,
     line                    VARCHAR(5)    NOT NULL,
     direction               VARCHAR(20)   NOT NULL,
-    origin_station_id       VARCHAR(10)   NOT NULL REFERENCES schema1.metro_stations(station_id),
-    destination_station_id  VARCHAR(10)   NOT NULL REFERENCES schema1.metro_stations(station_id),
+    origin_station_id       VARCHAR(10)   NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id  VARCHAR(10)   NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE RESTRICT,
     first_train_time        TIME          NOT NULL,
     last_train_time         TIME          NOT NULL,
     base_fare_usd           NUMERIC(6,2)  NOT NULL,
@@ -55,15 +55,15 @@ CREATE TABLE IF NOT EXISTS schema1.metro_schedules (
 
 -- Operating days per metro schedule
 CREATE TABLE IF NOT EXISTS schema1.metro_schedule_days (
-    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.metro_schedules(schedule_id),
+    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.metro_schedules(schedule_id) ON DELETE CASCADE,
     day_of_week VARCHAR(5)  NOT NULL CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
 -- Stop-level detail for each metro schedule
 CREATE TABLE IF NOT EXISTS schema1.metro_schedule_stops (
-    schedule_id                 VARCHAR(20) NOT NULL REFERENCES schema1.metro_schedules(schedule_id),
-    station_id                  VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id),
+    schedule_id                 VARCHAR(20) NOT NULL REFERENCES schema1.metro_schedules(schedule_id) ON DELETE CASCADE,
+    station_id                  VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE RESTRICT,
     stop_order                  INTEGER     NOT NULL,
     travel_time_from_origin_min INTEGER     NOT NULL,
     PRIMARY KEY (schedule_id, station_id)
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_stations (
 
 -- Lines served by each national rail station
 CREATE TABLE IF NOT EXISTS schema1.national_rail_station_lines (
-    station_id  VARCHAR(10) NOT NULL REFERENCES schema1.national_rail_stations(station_id),
+    station_id  VARCHAR(10) NOT NULL REFERENCES schema1.national_rail_stations(station_id) ON DELETE CASCADE,
     line        VARCHAR(5)  NOT NULL,
     PRIMARY KEY (station_id, line)
 );
@@ -91,8 +91,8 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_schedules (
     line                    VARCHAR(5)   NOT NULL,
     service_type            VARCHAR(20)  NOT NULL,  -- 'normal', 'express'
     direction               VARCHAR(20)  NOT NULL,
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id) ON DELETE RESTRICT,
     first_train_time        TIME         NOT NULL,
     last_train_time         TIME         NOT NULL,
     frequency_min           INTEGER      NOT NULL
@@ -100,15 +100,15 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_schedules (
 
 -- Operating days per national rail schedule
 CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_days (
-    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
+    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id) ON DELETE CASCADE,
     day_of_week VARCHAR(5)  NOT NULL CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun')),
     PRIMARY KEY (schedule_id, day_of_week)
 );
 
 -- Stop-level detail for each national rail schedule
 CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_stops (
-    schedule_id                 VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
-    station_id                  VARCHAR(10) NOT NULL REFERENCES schema1.national_rail_stations(station_id),
+    schedule_id                 VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id) ON DELETE CASCADE,
+    station_id                  VARCHAR(10) NOT NULL REFERENCES schema1.national_rail_stations(station_id) ON DELETE RESTRICT,
     stop_order                  INTEGER     NOT NULL,
     travel_time_from_origin_min INTEGER     NOT NULL,
     stop_type                   VARCHAR(15) NOT NULL DEFAULT 'stop'
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_stops (
 
 -- Fare classes per national rail schedule
 CREATE TABLE IF NOT EXISTS schema1.national_rail_fare_classes (
-    schedule_id       VARCHAR(20)  NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
+    schedule_id       VARCHAR(20)  NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id) ON DELETE CASCADE,
     fare_class        VARCHAR(20)  NOT NULL,  -- 'standard', 'first'
     base_fare_usd     NUMERIC(6,2) NOT NULL,
     per_stop_rate_usd NUMERIC(6,2) NOT NULL,
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_fare_classes (
 -- Seat layouts (one row per seat)
 CREATE TABLE IF NOT EXISTS schema1.national_rail_seat_layouts (
     layout_id   VARCHAR(10) NOT NULL,
-    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
+    schedule_id VARCHAR(20) NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id) ON DELETE CASCADE,
     coach       VARCHAR(5)  NOT NULL,
     fare_class  VARCHAR(20) NOT NULL,
     seat_id     VARCHAR(10) NOT NULL,
@@ -141,10 +141,10 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_seat_layouts (
 
 CREATE TABLE IF NOT EXISTS schema1.national_rail_bookings (
     booking_id              VARCHAR(10)  PRIMARY KEY,
-    user_id                 VARCHAR(10)  NOT NULL REFERENCES schema1.users(user_id),
-    schedule_id             VARCHAR(20)  NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id),
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id),
+    user_id                 VARCHAR(10)  NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT,
+    schedule_id             VARCHAR(20)  NOT NULL REFERENCES schema1.national_rail_schedules(schedule_id) ON DELETE RESTRICT,
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.national_rail_stations(station_id) ON DELETE RESTRICT,
     travel_date             DATE         NOT NULL,
     departure_time          TIME         NOT NULL,
     ticket_type             VARCHAR(20)  NOT NULL,
@@ -160,10 +160,10 @@ CREATE TABLE IF NOT EXISTS schema1.national_rail_bookings (
 
 CREATE TABLE IF NOT EXISTS schema1.metro_travels (
     trip_id                 VARCHAR(10)  PRIMARY KEY,
-    user_id                 VARCHAR(10)  NOT NULL REFERENCES schema1.users(user_id),
-    schedule_id             VARCHAR(20)  NOT NULL REFERENCES schema1.metro_schedules(schedule_id),
-    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id),
-    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id),
+    user_id                 VARCHAR(10)  NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT,
+    schedule_id             VARCHAR(20)  NOT NULL REFERENCES schema1.metro_schedules(schedule_id) ON DELETE RESTRICT,
+    origin_station_id       VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE RESTRICT,
+    destination_station_id  VARCHAR(10)  NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE RESTRICT,
     travel_date             DATE         NOT NULL,
     ticket_type             VARCHAR(20)  NOT NULL,  -- 'single', 'day_pass'
     day_pass_ref            VARCHAR(10),            -- references another trip_id for linked day_pass legs
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS schema1.feedback (
     feedback_id   VARCHAR(10) PRIMARY KEY,
     booking_id    VARCHAR(10) NOT NULL,  -- references BK* or MT* (soft ref)
     booking_type  VARCHAR(10) NOT NULL CHECK (booking_type IN ('rail', 'metro')),
-    user_id       VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id),
+    user_id       VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT,
     rating        SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
     comment       TEXT,
     submitted_at  TIMESTAMPTZ DEFAULT NOW()
@@ -230,7 +230,7 @@ CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding ON schema1.policy_docu
 
 CREATE TABLE IF NOT EXISTS schema2.credentials (
     id          SERIAL       PRIMARY KEY,
-    user_id     VARCHAR(20)  NOT NULL REFERENCES schema1.users(user_id),
+    user_id     VARCHAR(20)  NOT NULL REFERENCES schema1.users(user_id) ON DELETE CASCADE,
     stored_hash VARCHAR(255) NOT NULL,
     created_at  TIMESTAMPTZ  DEFAULT NOW()
 );
