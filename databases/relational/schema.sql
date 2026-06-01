@@ -11,6 +11,12 @@ CREATE SCHEMA IF NOT EXISTS schema2;
 -- ============================================================
 
 -- Users (no password column — credentials live in schema2.credentials)
+-- PK design: VARCHAR with human-readable prefixes (e.g. RU01) rather than UUID or SERIAL.
+-- The mock data already defines these business IDs; they are self-documenting, easy to trace
+-- across all three databases, and carry semantic meaning (prefix encodes entity type).
+-- UUID adds no benefit in a single-region system; SERIAL integers would lose that prefix.
+-- Delete strategy: soft delete via is_active flag — records are never physically removed,
+-- preserving audit trail and avoiding FK violations on financial history (payments, feedback).
 CREATE TABLE IF NOT EXISTS schema1.users (
     user_id         VARCHAR(10)  PRIMARY KEY,
     full_name       VARCHAR(100) NOT NULL,
