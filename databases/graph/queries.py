@@ -330,7 +330,25 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
 
     Returns:
         List of dicts: {station_id, name, hops_away, lines_affected}
+        When hops=0, returns only the delayed station itself.
     """
+    # Special case: hops=0 returns only the starting station
+    if hops == 0:
+        with _driver() as driver:
+            with driver.session() as session:
+                result = session.run(
+                    """
+                    MATCH (start) WHERE start.station_id = $station_id
+                    RETURN start.station_id  AS station_id,
+                           start.name        AS name,
+                           0                 AS hops_away,
+                           start.lines       AS lines_affected
+                    """,
+                    station_id=delayed_station_id,
+                )
+                return [dict(record) for record in result]
+    
+    # hops > 0: find all stations within N hops
     with _driver() as driver:
         with driver.session() as session:
             result = session.run(
