@@ -1,0 +1,537 @@
+# TransitFlow — Database Design Document
+
+<!-- ============================================================
+  編輯說明（給組員看，繳交前請刪除此區塊）
+  ============================================================
+  繳交檔名格式：Team<Id>_DESIGN_DOC.md（例如 Team01_DESIGN_DOC.md）
+  繳交方式：Markdown 或 PDF，透過 EEClass 上傳
+
+  文件共六個章節（標題必須與下方完全一致，否則可能不被計分）。
+  標記 [TODO] 的地方代表需要組員補充，其餘已根據現有程式碼填寫完成。
+
+  各章節滿分：
+    Section 1 — ER Diagram              : /25
+    Section 2 — Normalisation           : /20
+    Section 3 — Graph Design Rationale  : /25
+    Section 4 — Vector / RAG Design     : /15
+    Section 5 — AI Tool Usage Evidence  : /10
+    Section 6 — Reflection & Trade-offs : /5
+  ============================================================ -->
+
+---
+
+## Section 1 — Entity-Relationship Diagram
+
+<!-- ============================================================
+  評分重點（共 25 分）：
+  1. 所有 entity 都出現在圖中
+  2. Cardinality（1:N、M:N 等）必須標在「圖的連線上」，不能只寫在說明文字
+  3. 每個 entity 要顯示 PK、主要 FK、以及 2–3 個代表性欄位
+  4. 必須用工具繪製（dbdiagram.io / draw.io / Lucidchart），不接受手繪
+
+  [TODO] 請用 dbdiagram.io 或 draw.io 畫出以下的 ER 圖並嵌入截圖。
+         圖中每條連線都要有 cardinality 符號（1、N、M 等）。
+         建議參考下方的 Entity 清單來確認所有 entity 都有涵蓋。
+
+  注意陷阱：cardinality 標記若只出現在說明段落而不在圖上，該項得 0 分。
+  ============================================================ -->
+
+### [TODO] ER 圖（請嵌入圖片）
+
+> 請在此處插入 dbdiagram.io / draw.io 產出的 ER 圖截圖。
+
+### Entity 清單與主要關聯
+
+以下列出所有 entity 及其關聯，供繪圖參考：
+
+**schema1（主要業務資料）**
+
+| Entity | PK | 主要關聯 |
+|--------|----|----------|
+| `users` | `user_id` (VARCHAR) | 1 user → N `national_rail_bookings`；1 user → N `metro_travels`；1 user → N `feedback` |
+| `metro_stations` | `station_id` | 1 station → N `metro_station_lines`；1 station → N `metro_schedule_stops` |
+| `metro_station_lines` | (station_id, line) | M:N junction：metro_stations ↔ lines |
+| `metro_schedules` | `schedule_id` | 1 schedule → N `metro_schedule_stops`；1 schedule → N `metro_schedule_days` |
+| `metro_schedule_stops` | (schedule_id, station_id) | stop 序列 junction table |
+| `metro_schedule_days` | (schedule_id, day_of_week) | 運行日期 junction table |
+| `national_rail_stations` | `station_id` | 類同 metro_stations |
+| `national_rail_station_lines` | (station_id, line) | M:N junction |
+| `national_rail_schedules` | `schedule_id` | 1 → N stops、days、fare_classes |
+| `national_rail_schedule_stops` | (schedule_id, station_id) | |
+| `national_rail_schedule_days` | (schedule_id, day_of_week) | |
+| `national_rail_fare_classes` | (schedule_id, fare_class) | |
+| `national_rail_seat_layouts` | (schedule_id, coach, seat_id) | 1 schedule → N seats |
+| `national_rail_bookings` | `booking_id` | N bookings → 1 user；N bookings → 1 schedule；soft ref → `payments` |
+| `metro_travels` | `trip_id` | N trips → 1 user；soft ref → `payments` |
+| `payments` | `payment_id` | soft ref → booking（rail 或 metro） |
+| `feedback` | `feedback_id` | soft ref → booking；N → 1 user |
+| `policy_documents` | `id` (SERIAL) | pgvector 使用，獨立存放 |
+
+**schema2（認證資料，獨立隔離）**
+
+| Entity | PK | 說明 |
+|--------|----|------|
+| `credentials` | `id` (SERIAL) | 存放 Argon2id 密碼雜湊；透過 `user_id` FK 連結 schema1.users |
+
+---
+
+## Section 2 — Normalisation Justification
+
+<!-- ============================================================
+  評分重點（共 20 分）：
+  1. 至少一個 2NF 或 3NF 設計決策，需「點名 normal form + 說明 functional dependency」
+  2. 討論至少一個刻意的 de-normalisation（或解釋為何不需要）
+  3. Argon2id：說明為何優於 MD5/SHA-1，以及 salt 如何防彩虹表
+  4. 正確使用資料庫術語（functional dependency、candidate key、transitive dependency 等）
+  ============================================================ -->
+
+### 2.1 第三正規化（3NF）設計決策：Stop 序列獨立為 Junction Table
+
+在設計 `metro_schedules` 和 `national_rail_schedules` 時，Stop 序列（即每班列車經過哪些站、以何種順序）**沒有**以陣列欄位（如 `TEXT[]` 或 JSON column）儲存在 schedule 主表中，而是獨立抽出為：
+
+- `metro_schedule_stops(schedule_id, station_id, stop_order, travel_time_from_origin_min)`
+- `national_rail_schedule_stops(schedule_id, station_id, stop_order, travel_time_from_origin_min, stop_type)`
+
+**Functional dependency 分析：**
+
+若將 stop 資料直接嵌入 schedule 表，形成如 `(schedule_id, stop_order, station_id, travel_time)` 的 repeating group，則違反第一正規化（1NF）。進一步地，`travel_time_from_origin_min` 的值由 `(schedule_id, station_id)` 共同決定，而非僅由 `schedule_id` 決定——若放在 schedule 主表中，則因 partial dependency 而違反 2NF。
+
+將 stops 獨立為 junction table 後：
+
+- `schedule_id` → schedule 層級的屬性（line、direction、fare 等）
+- `(schedule_id, station_id)` → stop 層級的屬性（stop_order、travel_time）
+
+不存在 transitive dependency，達到 3NF。
+
+**實際效益：** 查詢兩站之間的停靠順序（用於訂票和路線查詢）只需一次 JOIN，SQL 易讀且可加索引優化。若改用陣列欄位，則需在應用層解析，效率更低且難以查詢。
+
+---
+
+### 2.2 刻意的 De-normalisation：`amount_usd` 存入 `national_rail_bookings`
+
+`national_rail_bookings` 表中包含 `amount_usd` 欄位，記錄訂票當下的票價金額。理論上此值可由 `national_rail_fare_classes` 計算得出（`base_fare + per_stop_rate × stops_travelled`）。
+
+這是一個刻意的 de-normalisation 決策，原因如下：
+
+1. **歷史保存**：票價規則可能隨時間調整，若不存入訂票記錄，日後查詢歷史訂單會計算出錯誤金額。
+2. **退款計算**：`execute_cancellation()` 需要快速讀取原始金額來計算退款比例，不需再 JOIN fare_classes 表。
+3. **Write-once 特性**：`amount_usd` 在訂票時確定後不再變動，不存在更新異常（update anomaly）的風險。
+
+---
+
+### 2.3 密碼雜湊：Argon2id 的選擇理由與 Salt 機制
+
+#### 為何選擇 Argon2id 而非 MD5 / SHA-1 / SHA-256？
+
+MD5 和 SHA-1 是通用雜湊函數（general-purpose hash functions），設計目標是**速度快**。這對密碼儲存而言是致命缺陷：現代 GPU 每秒可計算數十億次 MD5，攻擊者能在極短時間內暴力破解大量密碼。
+
+Argon2id 是專為密碼雜湊設計的**Key Derivation Function（KDF）**，具備：
+
+- **Memory-hard**：雜湊過程需佔用大量記憶體（預設數十 MB），使 GPU 並行攻擊成本大幅提升。即使攻擊者擁有高性能 GPU，每秒能計算的雜湊次數遠少於 MD5。
+- **Cost factor 可調整**：隨著硬體進步，可調高記憶體或時間參數，讓雜湊計算維持足夠慢的速度，而不需更換演算法。
+- **Argon2id 變體**：結合 Argon2i（防 side-channel 攻擊）與 Argon2d（防 GPU 攻擊）的優點。
+
+Bcrypt、scrypt、PBKDF2 也是合格的 KDF，但 Argon2id 是 2015 年 Password Hashing Competition 的勝者，是目前最新的推薦標準。
+
+#### Salt 如何防止彩虹表攻擊？
+
+Salt 是在雜湊密碼前自動附加的一段**隨機字串**，由 Argon2id 函式庫自動生成並嵌入雜湊結果中。
+
+考慮兩個使用者都設定密碼 `"password123"`：
+
+- **無 salt**：兩人得到相同雜湊值 `abc123...`。攻擊者只需預先計算常見密碼的雜湊表（彩虹表），即可一次查出所有使用相同密碼的帳號。
+- **有 salt**：使用者 A 的 salt 為 `x7f3...`，雜湊 `"password123" + "x7f3..."` 得到 `hash_A`；使用者 B 的 salt 為 `q2m9...`，得到完全不同的 `hash_B`。彩虹表對每個不同 salt 都必須重新計算，實際上使彩虹表攻擊無效。
+
+在本系統中，`argon2-cffi` 套件的 `PasswordHasher().hash(password)` 呼叫自動生成唯一 salt 並將其嵌入雜湊字串中，`verify()` 則自動從雜湊字串中提取 salt 進行驗證，整個過程對應用層透明。
+
+---
+
+### 2.4 Primary Key 設計決策：VARCHAR vs UUID vs SERIAL
+
+本系統採用 **VARCHAR(10) 作為大多數表的 PK**（如 `RU01`、`NR_SCH01`、`BK-A1B2C3`），而非自動遞增的 SERIAL 或隨機的 UUID。
+
+<!-- [TODO] 請補充你們的選擇理由，以下是參考論點，請依實際討論修改 -->
+
+**選擇理由：**
+- 本系統為**單一部署的教育環境**，不存在分散式系統需要全局唯一 ID（UUID 的主要應用場景）。
+- VARCHAR PK 在 debug 和人工查詢時具可讀性（`BK-A1B2C3` 明顯是訂單 ID），降低操作錯誤風險。
+- 相較 UUID 的 36 字元，VARCHAR(10) 佔用空間更小，JOIN 效能略優。
+- SERIAL 雖簡單，但無法攜帶業務語意（無法從 ID 判斷是 rail 還是 metro 訂單）。
+
+---
+
+## Section 3 — Graph Database Design Rationale
+
+<!-- ============================================================
+  評分重點（共 25 分）：
+  1. 說明 nodes、relationships、properties 各自是什麼以及「為什麼這樣設計」
+  2. 具體演算法論證（Dijkstra vs SQL recursive CTE），不能只說「graph 比較快」
+  3. 描述至少兩種 query 類型，並解釋 graph model 如何使其成為可能
+  4. 討論 node identity：哪個 property 唯一識別 node，以及為什麼
+  ============================================================ -->
+
+### 3.1 為什麼使用 Graph Database？
+
+TransitFlow 需要回答的核心問題是：**「從 A 站到 B 站，最快路線是什麼？」**
+
+若以 PostgreSQL 實作路線查詢，需要使用 **Recursive CTE（Common Table Expression）**，例如：
+
+```sql
+WITH RECURSIVE route AS (
+    SELECT station_id, 0 AS total_time, ARRAY[station_id] AS path
+    FROM stations WHERE station_id = 'MS01'
+    UNION ALL
+    SELECT l.to_station, r.total_time + l.travel_time, r.path || l.to_station
+    FROM links l
+    JOIN route r ON r.station_id = l.from_station
+    WHERE NOT l.to_station = ANY(r.path)
+)
+SELECT * FROM route WHERE station_id = 'MS14'
+ORDER BY total_time LIMIT 1;
+```
+
+此方式的問題：
+- 每次查詢都需要掃描整個 `links` 表格
+- 路徑去重（避免走回頭路）在 SQL 中複雜且效能差
+- 無法直接使用 Dijkstra 等優化演算法，必須手動實作
+
+Neo4j 原生支援 **APOC Dijkstra 演算法**，可直接以邊的 `travel_time_min` 屬性作為權重：
+
+```cypher
+CALL apoc.algo.dijkstra(origin, dest, 'METRO_LINK', 'travel_time_min', 0, 50)
+YIELD path, weight
+RETURN path, weight
+```
+
+這在圖資料庫中是 O((V + E) log V) 的高效操作，並且 Neo4j 內部以鄰接清單（adjacency list）儲存邊，遍歷相鄰節點的成本接近 O(1)，而 SQL JOIN 每次都需要掃描 B-tree 索引。
+
+---
+
+### 3.2 Graph 模型設計
+
+#### Nodes（節點）
+
+| Node Label | 儲存什麼 | 為何設計為 Node |
+|------------|----------|----------------|
+| `MetroStation` | 城市地鐵站（MS01–MS20） | 站是路線中的「實體」，具有身份（ID、名稱）和多條邊的連接點 |
+| `NationalRailStation` | 國鐵站（NR01–NR10） | 與 MetroStation 不同的網絡，需要明確區分以支援 network-aware routing |
+
+兩種 node label 分開設計的原因：地鐵和國鐵是獨立的票價和路線系統，查詢時需要限定在單一網絡中（使用 `METRO_LINK` 或 `RAIL_LINK`），混用會導致跨網絡的隨機路徑。
+
+**Node Properties（節點屬性）：**
+- `station_id`：唯一識別符（見 3.4 節）
+- `name`：顯示名稱
+- `lines`：所服務的路線（清單）
+- `is_interchange_metro` / `is_interchange_national_rail`：標記換乘站
+
+#### Relationships（關係）
+
+| Relationship Type | 連結 | 屬性 | 為何設計為 Relationship |
+|-------------------|------|------|------------------------|
+| `METRO_LINK` | MetroStation → MetroStation | `travel_time_min`、`line` | 站與站之間的實體連接是典型的圖邊；權重（行車時間）直接掛在邊上，Dijkstra 可直接使用 |
+| `RAIL_LINK` | NationalRailStation → NationalRailStation | `travel_time_min`、`line` | 同上 |
+| `INTERCHANGE_TO` | MetroStation ↔ NationalRailStation | `travel_time_min`（固定 5 分鐘） | 跨網絡換乘是一種特殊的連接，需要與一般路線邊區分，避免混淆 routing 演算法 |
+
+所有關係都是**有向（directed）**，因為 `METRO_LINK` 邊在 JSON 資料中雙向定義（每個站列出其相鄰站），確保 Dijkstra 可以從兩個方向查詢。
+
+#### Properties（屬性）
+
+屬性（而非節點）存放的資料：`travel_time_min` 是邊的屬性而非節點屬性，因為行車時間屬於「兩站之間的連接」而不屬於「站本身」。若存在節點上，則一個站連接多條線時會發生歧義。
+
+---
+
+### 3.3 支援的 Query 類型
+
+#### Query Type 1：最快路線（Shortest Path by Time）
+
+```cypher
+CALL apoc.algo.dijkstra(origin, dest, 'METRO_LINK', 'travel_time_min', 0, 50)
+YIELD path, weight
+```
+
+Graph model 使此查詢成為可能的原因：`travel_time_min` 直接存放在邊上，APOC 的 Dijkstra 實作可直接遍歷所有鄰接邊並累加權重，無需 JOIN 額外的表格。
+
+#### Query Type 2：跨網絡換乘路徑（Interchange Path）
+
+```cypher
+CALL apoc.algo.dijkstra(origin, dest, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'travel_time_min', 0, 50)
+```
+
+只需在 `rel_type` 參數中加入 `INTERCHANGE_TO`，演算法即可自動跨越地鐵和國鐵的網絡邊界。在 SQL 中實現這個查詢需要兩個獨立的 recursive CTE 加上 JOIN，複雜度遠高於此。
+
+#### Query Type 3：Delay Ripple（影響範圍分析）
+
+```cypher
+MATCH (origin)-[*0..2]-(affected)
+WHERE origin.station_id = $station_id
+RETURN DISTINCT affected, length(path) AS hops_away
+```
+
+BFS（廣度優先搜尋）在圖資料庫中只需指定最大 hop 數，在關聯式資料庫中需要 N 層 recursive CTE。
+
+---
+
+### 3.4 Node Identity：`station_id` 的選擇
+
+每個節點以 `station_id`（如 `MS01`、`NR05`）作為唯一識別符，使用 Neo4j `MERGE` 語法確保唯一性：
+
+```cypher
+MERGE (n:MetroStation {station_id: $id})
+```
+
+**選擇 `station_id` 而非 `name` 的原因：**
+- `name` 可能重複（地鐵 "Old Town" 和國鐵 "Old Town Junction" 都含 "Old Town"），導致 MERGE 錯誤地合併節點
+- `station_id` 是業務系統的主鍵，與 PostgreSQL 中的 FK 一致，確保跨資料庫的一致性
+- 簡短的 ID 作為圖節點的 lookup key 效能優於長字串
+
+---
+
+## Section 4 — Vector / RAG Design
+
+<!-- ============================================================
+  評分重點（共 15 分）：
+  1. 說明嵌入什麼、以及為何 cosine similarity 適合語意搜尋
+     （不能只說「它測量相似度」，要說明為何是 magnitude-independent）
+  2. 完整的 RAG 四步驟 pipeline
+  3. Embedding 維度（768 或 3072）以及切換 provider 的後果
+  ============================================================ -->
+
+### 4.1 嵌入了什麼內容？
+
+系統將以下政策文件嵌入向量資料庫（`schema1.policy_documents`）：
+
+| 來源檔案 | 內容 |
+|----------|------|
+| `refund_policy.json` | 退票退款規則（RF001–RF005）：各種情況下的退款百分比 |
+| `ticket_types.json` | 票種說明：單程票、日票、頭等艙、學生優惠等 |
+| `booking_rules.json` | 訂票規則：提前購票限制、修改政策等 |
+| `travel_policies.json` | 旅行政策：行李、自行車、寵物、飲食、行為規範等 |
+
+這些文件透過 `skeleton/seed_vectors.py` 在啟動時嵌入，每筆記錄對應 `policy_documents` 表中的一行，包含 `title`、`category`、`content` 及 `embedding`（向量）。
+
+---
+
+### 4.2 為何使用 Cosine Similarity？
+
+向量資料庫以 **Cosine Similarity（餘弦相似度）** 衡量查詢向量與文件向量的相似程度：
+
+$$\text{similarity} = \frac{\vec{A} \cdot \vec{B}}{|\vec{A}||\vec{B}|}$$
+
+**為何 Cosine Similarity 適合語意搜尋：**
+
+Cosine Similarity 是**magnitude-independent（不受向量長度影響）**的相似度指標。它只衡量兩個向量在高維空間中的「方向」是否相同，而不考慮向量的絕對大小。
+
+這對文字嵌入特別重要：一份關於「退款」的短句和一份包含更多「退款」相關用語的長段落，在嵌入空間中應該方向相近（語意相似），但因長度不同而向量大小可能差異很大。若使用 Euclidean Distance，長文件的向量會因為「較大」而被視為距離較遠，即使語意相近。Cosine Similarity 排除了這個干擾。
+
+在 PostgreSQL 中，Cosine Distance（`<=>` 運算子）等於 `1 - cosine_similarity`，越小代表越相似：
+
+```sql
+SELECT title, 1 - (embedding <=> $query_vector) AS similarity
+FROM schema1.policy_documents
+ORDER BY embedding <=> $query_vector
+LIMIT 5;
+```
+
+---
+
+### 4.3 RAG Pipeline 完整流程
+
+```
+[使用者問題]
+     │
+     ▼  Step 1: Query Embedding
+  skeleton/llm_provider.py
+  llm.embed("My train was delayed 45 min, can I get compensation?")
+  → 使用 nomic-embed-text（Ollama）將問題轉為 768 維向量 q
+     │
+     ▼  Step 2: Similarity Search
+  databases/relational/queries.py :: query_policy_vector_search(q)
+  → SQL: SELECT ... FROM policy_documents WHERE 1-(embedding<=>q) > 0.3
+          ORDER BY embedding<=>q LIMIT 5
+  → 找出語意最接近的政策文件（不依賴關鍵字匹配）
+     │
+     ▼  Step 3: Retrieved Documents → LLM Prompt
+  skeleton/agent.py
+  → 將查詢到的文件內容與原始問題組合成 prompt：
+    "DATA FROM TRANSITFLOW DATABASE:
+     [delay_compensation_policy]
+     RF005: 30–59 min delay → 50% refund...
+     User asks: My train was delayed 45 min..."
+     │
+     ▼  Step 4: LLM Generates Answer
+  llm.chat(messages=..., system_prompt=...)
+  → LLM 閱讀檢索到的政策，根據政策內容回答問題
+  → 若沒有找到相關文件，agent 明確告知找不到（避免幻覺）
+     │
+     ▼
+  [最終回答：依據 RF005，45 分鐘延誤可獲 50% 退款...]
+```
+
+**RAG 的關鍵優勢：** 使用者不需要知道政策文件的確切措辭。即使問「我的車晚點很久，有補償嗎？」（與文件中的「Delay Compensation」措辭完全不同），語意搜尋仍能找到正確的政策文件。
+
+---
+
+### 4.4 Embedding 維度與 Provider 切換
+
+本系統目前使用 **Ollama 的 `nomic-embed-text` 模型**，產生 **768 維**向量：
+
+```sql
+-- schema.sql
+embedding   vector(768)
+```
+
+若切換至 Gemini（`text-embedding-004` 模型），向量維度變為 **3072 維**。
+
+**切換 provider 後的後果：**
+
+已存入資料庫的向量是 768 維，新的查詢向量是 3072 維。PostgreSQL 的 `<=>` 運算子要求兩個向量**維度必須完全相同**，否則會拋出：
+
+```
+ERROR: different vector dimensions 768 and 3072
+```
+
+此時所有政策搜尋功能將完全失效。解決方式：
+
+1. 更新 `schema.sql` 中的 `vector(768)` → `vector(3072)`
+2. 重置資料庫：`docker compose down -v && docker compose up -d`
+3. 重新執行：`python skeleton/seed_vectors.py`（以新模型重新嵌入所有文件）
+
+**底線：向量維度與嵌入模型必須在整個系統生命週期中保持一致。** 這也是為何團隊必須在開始前統一決定使用 Ollama 或 Gemini。
+
+---
+
+## Section 5 — AI Tool Usage Evidence
+
+<!-- ============================================================
+  評分重點（共 10 分）：
+  - 3 到 5 個例子，每個例子必須包含：Context、Prompt、Outcome 三個欄位
+  - 至少一個例子描述 AI 給出錯誤輸出，以及如何發現和修正
+  - Prompt 要具體有意義，不能是泛泛的「解釋資料庫」
+  - 涵蓋不同面向（schema 設計、query 撰寫、debug、設計理由等）
+
+  [TODO] 請組員根據實際使用 AI 工具（ChatGPT / Claude / Gemini 等）
+         的真實對話補充以下 5 個例子。
+         每個例子的三個欄位都必須填寫，缺任何一個欄位會扣分。
+         範例格式如下，請依序修改後填入。
+  ============================================================ -->
+
+### Example 1：[TODO]
+
+> **Context：** [說明當時在做什麼，例如：在設計 national_rail_schedule_stops 表格時，不確定是否需要獨立的 junction table]
+
+> **Prompt：** [貼上你實際傳給 AI 的 prompt，要具體，包含你的情境和問題]
+
+> **Outcome：** [AI 的回答是否有用？你怎麼使用或修改它的建議？]
+
+---
+
+### Example 2：[TODO]
+
+> **Context：** [建議涵蓋 SQL query 撰寫相關]
+
+> **Prompt：** [...]
+
+> **Outcome：** [...]
+
+---
+
+### Example 3：[TODO — 此例必須描述 AI 給出錯誤輸出的情況]
+
+> **Context：** [說明情境]
+
+> **Prompt：** [你問了什麼]
+
+> **Outcome：** AI 的回答有誤：[說明什麼地方錯了，如何發現錯誤，以及你做了什麼修正]
+
+---
+
+### Example 4：[TODO]
+
+> **Context：** [建議涵蓋 Neo4j Cypher 或 graph 設計相關]
+
+> **Prompt：** [...]
+
+> **Outcome：** [...]
+
+---
+
+### Example 5：[TODO]
+
+> **Context：** [建議涵蓋 Argon2id / 密碼安全或 debug 相關]
+
+> **Prompt：** [...]
+
+> **Outcome：** [...]
+
+---
+
+## Section 6 — Reflection & Trade-offs
+
+<!-- ============================================================
+  評分重點（共 5 分）：
+  1. 兩個具體的設計決策，需說明「為什麼這樣選，不那樣選」
+     （不能模糊，要具體：「我們選 VARCHAR 而非 UUID，因為...」）
+  2. 一個在 production 環境中需要不同做法的具體面向
+  ============================================================ -->
+
+### 6.1 設計決策一：密碼雜湊隔離在獨立的 `schema2.credentials`
+
+我們將 Argon2id 雜湊值存入 `schema2.credentials`，而非直接加一欄 `password_hash` 在 `schema1.users` 中。
+
+**決策理由：**
+- **最小權限原則（Principle of Least Privilege）**：應用程式讀取使用者個人資料（姓名、email）和驗證密碼是兩個不同的操作。分離 schema 使得可以為只需讀取個人資料的操作授予不包含密碼雜湊的資料庫角色。
+- **降低資料外洩衝擊**：若 `schema1` 的查詢結果因 SQL injection 等漏洞洩露，攻擊者仍無法取得密碼雜湊，因為雜湊在獨立的 `schema2` 中。
+- **代價**：每次登入需要額外一次 JOIN（`schema1.users` + `schema2.credentials`），但安全性提升值得這個輕微的效能犧牲。
+
+---
+
+### 6.2 設計決策二：Soft Delete vs Hard Delete
+
+本系統對訂票狀態採用 **Soft Delete**（以 `status` 欄位記錄狀態），而非直接刪除資料列：
+
+```sql
+-- national_rail_bookings
+status VARCHAR(20) NOT NULL  -- 'confirmed', 'completed', 'cancelled'
+```
+
+**決策理由：**
+- **退款計算需要原始訂票記錄**：`execute_cancellation()` 需要讀取 `amount_usd`、`travel_date`、`departure_time` 才能計算退款比例，Hard delete 後這些資料就無法存取。
+- **稽核軌跡（Audit Trail）**：在金融交易系統中，保留歷史記錄是基本要求，Hard delete 會破壞交易完整性。
+- **代價**：所有查詢都需要加上 `WHERE status NOT IN ('cancelled')` 過濾條件，若忘記加入會回傳錯誤資料。這在 production 系統中通常透過 **Row-Level Security（RLS）** 或 **View** 來強制執行，但本系統為教育目的，由應用層查詢自行處理。
+
+---
+
+### 6.3 在 Production 系統中的不同做法
+
+**缺少 FK Cascade 行為的問題：**
+
+本系統的所有外鍵均未指定 `ON DELETE` 行為（如 `CASCADE`、`RESTRICT`、`SET NULL`），例如：
+
+```sql
+-- 目前：
+user_id VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id)
+
+-- Production 應為：
+user_id VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT
+```
+
+在 production 環境中，這是必須明確指定的：
+- `ON DELETE RESTRICT`：防止刪除有訂票記錄的使用者（符合本系統語意）
+- `ON DELETE CASCADE`：刪除使用者時自動刪除其所有訂單（通常不適合金融系統）
+
+本教育版本省略此設定，數據完整性依賴應用程式邏輯維護，在 production 系統中這樣的假設風險過高，應由資料庫層強制執行。
+
+此外，production 系統還需要考慮：
+- **Connection Pooling**（如 PgBouncer）：本系統每次查詢建立新連線，高流量下會耗盡連線數
+- **Schema Migration**（如 Alembic / Flyway）：本系統以 `docker compose down -v` 重置 schema，production 環境不能刪除資料
+
+---
+
+<!-- ============================================================
+  [提醒] 繳交前請確認：
+  1. Section 1 已有 ER 圖截圖，cardinality 標在圖的連線上
+  2. Section 5 的 5 個 AI 例子全部填完，每個有 Context + Prompt + Outcome
+  3. 檔名改為 Team<Id>_DESIGN_DOC.md（例如 Team01_DESIGN_DOC.md）
+  4. 若有 Task 6，新增 Section 7 在本文件末尾
+  5. 刪除所有 [TODO] 標記和 HTML 註解（<!-- --> 區塊）再繳交
+  ============================================================ -->
