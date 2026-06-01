@@ -277,6 +277,8 @@ def query_available_seats(
     Returns:
         List of dicts with seat_id, coach, row, column.
     """
+    # NOT EXISTS is used instead of LEFT JOIN / IS NULL
+    # to correctly handle multi-booking edge cases on the same seat
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
@@ -587,6 +589,8 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
           Express (RF002): ≥48h → 100% | 2–48h  → 50% | <2h   → 0%
     """
     conn = psycopg2.connect(PG_DSN)
+    # autocommit disabled so booking + payment are atomic;
+    # if payment insert fails, booking is rolled back too
     conn.autocommit = False
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -607,6 +611,8 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
             hours_until = (travel_dt - datetime.now(timezone.utc)).total_seconds() / 3600
             amount = float(booking["amount_usd"])
 
+            # RF001 (normal): tiered refund based on hours before departure
+            # RF002 (express): simpler 2-tier — stricter because express seats are limited  
             if booking["service_type"] == "express":
                 if hours_until >= 48:
                     refund_pct, policy = 1.0, "RF002: >48h — 100% refund"
@@ -703,7 +709,8 @@ def register_user(
             """, (user_id, full_name, email, dob,
                   secret_question, secret_answer, datetime.now(timezone.utc)))
 
-            # Step 2: insert Argon2id hash into schema2.credentials
+            # credentials stored in schema2 (isolated from schema1.users)
+            # so profile queries never accidentally expose password hashes
             cur.execute("""
                 INSERT INTO schema2.credentials (user_id, stored_hash)
                 VALUES (%s, %s)
