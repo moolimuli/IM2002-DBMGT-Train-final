@@ -548,9 +548,11 @@ def execute_booking(
                 VALUES (%s, %s, 'rail', %s, 'credit_card', 'paid', %s)
             """, (payment_id, booking_id, amount_usd, now))
 
+            ###nini fix
             conn.commit()
             return True, {
                 "booking_id": booking_id,
+                "user_id": user_id,
                 "schedule_id": schedule_id,
                 "origin_station_id": origin_station_id,
                 "destination_station_id": destination_station_id,
@@ -561,7 +563,8 @@ def execute_booking(
                 "amount_usd": float(amount_usd),
                 "status": "confirmed",
                 "payment_id": payment_id,
-            }
+            }   
+            ###nini fix end
     except Exception as e:
         conn.rollback()
         return False, str(e)
