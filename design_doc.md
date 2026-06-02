@@ -455,14 +455,29 @@ ERROR: different vector dimensions 768 and 3072
 
 ---
 
-### Example 5：[TODO]
+### Example 5：[ Schema Design (Argon2id 密碼儲存)]
 
-> **Context：** [建議涵蓋 Argon2id / 密碼安全或 debug 相關]
+> **Context：**需要實作安全的密碼儲存，老師要求使用 Argon2id，並且密碼不能和使用者資料放在同一個 table。
 
-> **Prompt：** [...]
+> **Prompt：** [老師說一定要使用 Argon2id 並且也要有 salt，我們最後選擇 Option 3（同一個 DB，兩個不同 Schema）]
 
-> **Outcome：** [...]
+> **Outcome：** AI 提供了完整的實作方案：在 schema1.users 移除 password 欄位，新增 schema2.credentials 存放 Argon2id hash。並提供 register_user、login_user、update_password 的完整修改版本。驗證腳本 verify_password.py 跑出全部 ✅，確認實作正確。
 
+### Example 6：[Query Writing (query_national_rail_availability 優化)]
+
+> **Context：**測試時發現 query_national_rail_availability 回傳的資料不夠豐富，AI 只拿到 schedule_id 但沒有站名、票價計算結果、剩餘座位數。
+
+> **Prompt：** 「執行測試腳本後發現回傳沒有 origin_name、standard_fare_usd 等欄位，LLM 看不懂資料」
+
+> **Outcome：** AI 重寫了 SQL query，加入 JOIN national_rail_stations 取得站名，直接在 SQL 裡計算 ROUND(base_fare_usd + per_stop_rate_usd * stops) 得出票價，並加入 seat_availability 子查詢。測試後資料大幅改善，8b 模型能正確回答班次問題。
+
+### Example 7：[AI 輸出錯誤需要修正 (agent.py skip 邏輯)]
+
+> **Context：**測試第二題「fastest metro route from MS01 to MS14」時，debug panel 顯示 Skipped find_route — empty params，工具被跳過。
+
+> **Prompt：** 「貼出 debug panel 內容給 AI 分析。」
+
+> **Outcome：** AI 找到 agent.py 第 736 行 if any(v == "" for v in params.values())，這個邏輯會因為 1b 模型傳入空的 avoid_station_id 而跳過整個 find_route 工具。AI 的初版修正是把所有空字串都過濾，但這樣仍然會誤判。最終修正是只檢查必填參數，建立 _required 字典對應每個工具的必填欄位，選填參數的空字串不影響執行。
 ---
 
 ## Section 6 — Reflection & Trade-offs
