@@ -1,3 +1,6 @@
+# TASK 6 EXTENSION: Added feedback query tool, policy keyword fallback routing,
+# content truncation fix, lost property / accessibility keyword support,
+# and _strip_metadata embedding optimisation integration.
 """
 TransitFlow — Intelligent Agent
 ================================

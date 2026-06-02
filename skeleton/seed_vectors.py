@@ -1,3 +1,5 @@
+# TASK 6 EXTENSION: Topic-level document splitting, _strip_metadata for clean
+# embeddings, idempotent re-seeding, lost_property and accessibility sections.
 """
 TransitFlow — pgvector Policy Document Seeder
 Run once after starting Docker:

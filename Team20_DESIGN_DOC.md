@@ -562,6 +562,190 @@ user_id VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRIC
 
 ---
 
+## Section 7 — Task 6 Extension: Vector Search Optimisation & Feedback Query
+
+### 7.1 Motivation
+
+The original TransitFlow vector search pipeline had three critical problems that caused
+the LLM to produce incorrect answers, even when the correct policy data existed in the
+database:
+
+1. **Document granularity too coarse**: The entire `booking_rules.json` national_rail
+   section (~20 topics) was stored as a single document. When a user asked about "dogs",
+   the embedding matched weakly because the document mixed pets with bicycles, luggage,
+   food, etc. The 800-character content truncation then cut off the pets section entirely.
+
+2. **LLM tool routing errors**: The small LLM (llama3.2:1b) frequently selected wrong
+   tools for policy questions. For example, "Can I drink alcohol on the metro?" was
+   routed to `get_metro_fare`, returning fare data instead of the food & drink policy.
+
+3. **No feedback query capability**: The `schema1.feedback` table contained 30 passenger
+   ratings and comments, but the agent had no tool to query them. Questions like
+   "How many 5-star ratings?" could not be answered.
+
+These are **system-level database and pipeline issues**, not LLM prompt-tuning problems.
+Fixing them required changes to the seeding scripts, policy data, query functions, and
+agent tool routing.
+
+---
+
+### 7.2 Database Changes
+
+#### 7.2.1 Vector Database — Document Splitting (seed_vectors.py)
+
+**Before:** 5 large section-level documents (one per JSON section)
+**After:** ~50 topic-level documents (one per topic, e.g., "pets", "bicycles", "luggage")
+
+```python
+# seed_vectors.py — topic-level splitting
+for section in ("metro", "national_rail", "lost_property", "accessibility"):
+    if section in tp:
+        section_data = tp[section]
+        for topic_key, topic_value in section_data.items():
+            docs.append({
+                "title": f"Travel Policies — {section} — {topic_key}",
+                "category": "conduct",
+                "content": _text({topic_key: topic_value}),
+            })
+```
+
+This ensures each embedding is semantically focused. A query about "dogs" now matches
+`Travel Policies — National Rail — Pets` (similarity 0.713) instead of the diluted
+full-section document.
+
+#### 7.2.2 Vector Database — Metadata Stripping (seed_vectors.py)
+
+```python
+def _strip_metadata(data):
+    """Remove '_'-prefixed keys before embedding to avoid polluting vector space."""
+    if isinstance(data, dict):
+        return {k: _strip_metadata(v) for k, v in data.items() if not k.startswith("_")}
+    if isinstance(data, list):
+        return [_strip_metadata(item) for item in data]
+    return data
+```
+
+Annotation fields like `"_modified": "2026-05-28: Added explicit examples..."` are
+stripped from the embedding input, but the full content (including annotations) is
+still stored in the database and shown to the LLM.
+
+#### 7.2.3 Vector Database — New Policy Documents (travel_policies.json)
+
+Two new top-level sections added:
+
+| Section | Content |
+|---------|---------|
+| `lost_property.metro` | Reporting process, Central Square (MS01) office, 30-day retention |
+| `lost_property.national_rail` | Reporting process, Central Station (NR01) office, 60-day retention, liability |
+| `accessibility.metro` | Step-free access, lifts, audio/visual, guide dogs, 2-hour advance contact |
+| `accessibility.national_rail` | Wheelchair spaces (2 per carriage), hearing loops, large print, helpline |
+
+#### 7.2.4 Relational Database — Feedback Query (queries.py)
+
+```python
+def query_feedback_summary(booking_id: str = None) -> dict:
+    """
+    Returns:
+      - rating_summary: {"5_star": 12, "4_star": 12, "3_star": 5, "2_star": 1}
+      - average_rating: 4.17
+      - total_feedback_count: 30
+      - recent_comments: [latest 10 with user_name, rating, comment, ...]
+    """
+```
+
+SQL uses `GROUP BY rating` for distribution, `AVG(rating)` for average, and
+`JOIN schema1.users` to include commenter names. Optionally filters by `booking_id`.
+
+#### 7.2.5 Policy Data Enhancement (refund_policy.json)
+
+Added explicit boundary examples to RF001 and RF002 cancellation windows to help
+the small LLM correctly interpret conditions:
+
+```json
+{
+  "condition": "Cancellation requested at least 2 hours but less than 24 hours
+    before scheduled departure (e.g. cancelling 2, 3, 5, 10, or 12 hours
+    before departure all qualify for 50% refund)"
+}
+```
+
+Without these examples, the LLM interpreted "2 hours before" as falling into the
+"<2 hours" window (0% refund) instead of the "≥2 hours" window (50% refund).
+
+---
+
+### 7.3 Example Queries
+
+#### Example 1 — Feedback Statistics (Relational)
+
+```sql
+SELECT rating, COUNT(*) AS count
+FROM schema1.feedback
+GROUP BY rating
+ORDER BY rating DESC;
+```
+
+Output:
+```
+rating | count
+-------+------
+     5 |    12
+     4 |    12
+     3 |     5
+     2 |     1
+```
+
+#### Example 2 — Lost Property Policy (Vector Similarity Search)
+
+Query: "I left my phone on the metro. How do I report it?"
+
+```sql
+SELECT title, 1 - (embedding <=> query_vector) AS similarity
+FROM schema1.policy_documents
+ORDER BY embedding <=> query_vector
+LIMIT 3;
+```
+
+Output:
+```
+title                                      | similarity
+-------------------------------------------+-----------
+Travel Policies — Lost Property — Metro    |     0.729
+Travel Policies — Lost Property — Nat Rail |     0.661
+Booking Rules — General — Lost Tickets     |     0.604
+```
+
+#### Example 3 — Metro Alcohol Policy (Vector with Tool Override)
+
+Query: "Is it allowed to drink alcohol on the metro?"
+
+Without the extension, the LLM routes this to `get_metro_fare` (because "metro" triggers
+fare lookup). With Rule 4's `_POLICY_KEYWORDS` and `_wrong_tool_for_policy` override:
+
+```
+Tool override: get_metro_fare → search_policy
+Result: Travel Policies — Metro — Food And Drink (similarity 0.755)
+Answer: "Alcohol consumption is not permitted on metro services or at stations."
+```
+
+---
+
+### 7.4 Testing Evidence
+
+| Question | Before Extension | After Extension |
+|----------|-----------------|-----------------|
+| "Am I allowed to bring my dog on national rail?" | ❌ "No, dogs not allowed" (wrong — called wrong tool, found only Metro pets policy) | ✅ "Yes, dogs on a lead in standard class" (similarity 0.713) |
+| "Is it allowed to drink alcohol on the metro?" | ❌ Called `get_metro_fare`, returned fare data | ✅ "Alcohol not permitted on metro" (similarity 0.755) |
+| "How much does a child aged 8 pay for a metro ticket?" | ❌ Called `get_metro_fare`, no child info | ✅ Found Metro Child Fares (similarity 0.722) |
+| "I left my phone on the metro" | ❌ "No data found" | ✅ "Report via app, collected at MS01, 30-day retention" (similarity 0.729) |
+| "How long does metro keep lost items?" | N/A (policy didn't exist) | ✅ "30 days, then donated or disposed" (similarity 0.834) |
+| "Are metro stations wheelchair accessible?" | N/A (limited data) | ✅ "All step-free, lifts at interchanges" (similarity 0.843) |
+| "Do national rail stations have hearing loops?" | N/A (data didn't exist) | ✅ "Yes, all staffed ticket counters" (similarity 0.691) |
+| "How many 5-star ratings?" | ❌ No tool available | ✅ "12 five-star ratings, average 4.17" |
+
+> Note: Similarity scores and LLM answer quality tested with Ollama llama3.2:1b and
+> llama3.2:8b. Raw data debug panel screenshots available on request.
+
 <!-- ============================================================
   [提醒] 繳交前請確認：
   1. Section 1 已有 ER 圖截圖，cardinality 標在圖的連線上

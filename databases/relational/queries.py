@@ -1,3 +1,5 @@
+# TASK 6 EXTENSION: Added query_feedback_summary() for feedback statistics
+# and recent comments from schema1.feedback table.
 """
 TransitFlow — PostgreSQL / Relational Database Layer
 =====================================================
