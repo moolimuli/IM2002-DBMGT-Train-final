@@ -39,6 +39,7 @@
 ### [TODO] ER 圖（請嵌入圖片）
 
 > 請在此處插入 dbdiagram.io / draw.io 產出的 ER 圖截圖。
+![ER Diagram](er_diagram.png)
 
 ### Entity 清單與主要關聯
 
@@ -457,7 +458,7 @@ ERROR: different vector dimensions 768 and 3072
 
 ### Example 5：[ Schema Design (Argon2id 密碼儲存)]
 
-> **Context：**需要實作安全的密碼儲存，老師要求使用 Argon2id，並且密碼不能和使用者資料放在同一個 table。
+Context：需要實作安全的密碼儲存，老師要求使用 Argon2id，並且密碼不能和使用者資料放在同一個 table。
 
 > **Prompt：** [老師說一定要使用 Argon2id 並且也要有 salt，我們最後選擇 Option 3（同一個 DB，兩個不同 Schema）]
 
