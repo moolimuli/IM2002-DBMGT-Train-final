@@ -117,8 +117,14 @@ def build_documents():
                 })
 
     # travel_policies.json — one document per TOPIC within each section
+    # ── MODIFIED 2026-05-29: Added "lost_property" and "accessibility" sections ──
+    # These are top-level sections added to travel_policies.json alongside
+    # "metro" and "national_rail". Each sub-section (metro/national_rail within
+    # them) is split into a separate document for focused vector embeddings.
+    # ─────────────────────────────────────────────────────────────────────────────
     tp = _load("travel_policies.json")
-    for section in ("metro", "national_rail"):
+    for section in ("metro", "national_rail", "lost_property", "accessibility"):
+        # 6/1 update: added "lost_property" and "accessibility" sections to travel_policies.json;
         if section in tp:
             section_data = tp[section]
             if isinstance(section_data, dict):

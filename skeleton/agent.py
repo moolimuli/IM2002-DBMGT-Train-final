@@ -47,6 +47,8 @@ from databases.relational.queries import (
     execute_booking,
     execute_cancellation,
     query_policy_vector_search,
+    # ── ADDED 2026-05-29: feedback query for get_feedback_summary tool ────
+    query_feedback_summary,
 )
 from databases.graph.queries import (
     query_shortest_route,
@@ -253,6 +255,20 @@ TOOLS = [
         },
         "required": ["query"],
     },
+    # ── ADDED 2026-05-29: feedback summary tool ─────────────────────────────
+    {
+        "name": "get_feedback_summary",
+        "description": (
+            "Get passenger feedback ratings and comments. "
+            "Use when the user asks about ratings, reviews, stars, feedback, "
+            "or satisfaction scores. Can optionally filter by a specific booking ID."
+        ),
+        "parameters": {
+            "booking_id": {"type": "string", "description": "Optional booking ID e.g. BK001 or MT001 to filter feedback"},
+        },
+        "required": [],
+    },
+    # ── END ADDED 2026-05-29 ────────────────────────────────────────────────
     {
         "name": "find_route",
         "description": (
@@ -324,6 +340,7 @@ make_booking(schedule_id, origin_station_id, destination_station_id, travel_date
 cancel_booking(booking_id)
 get_user_bookings()
 search_policy(query)
+get_feedback_summary(booking_id?)
 find_alternative_routes(origin_id, destination_id, avoid_station_id, network?)
 get_station_connections(station_id)
 get_delay_ripple(delayed_station_id, hops?)"""
@@ -440,6 +457,11 @@ def _execute_tool(
                 for d in docs
             ]
             # ── END MODIFIED 2026-05-28 ─────────────────────────────────────
+
+        # ── ADDED 2026-05-29: feedback summary tool execution ────────────
+        elif tool_name == "get_feedback_summary":
+            result = query_feedback_summary(params.get("booking_id"))
+        # ── END ADDED 2026-05-29 ────────────────────────────────────────
 
         elif tool_name == "find_route":
             origin_id      = params["origin_id"]
@@ -785,6 +807,14 @@ JSON:"""
         "change fee", "change ticket", "modify booking",
         "payment method", "credit card", "debit card", "ewallet",
         "lost ticket", "ticket validity", "valid id",
+        # ── ADDED 2026-05-29: lost property and accessibility keywords ───────
+        "lost property", "lost item", "lost my", "left my", "report lost", "found item",
+        "lost", "wallet", "keys", "collect it", "where can i collect",
+        "hearing loop", "large print", "wheelchair space",
+        # ─────────────────────────────────────────────────────────────────────
+        # NOTE: feedback keywords are handled separately (Rule 5 below),
+        # not in _POLICY_KEYWORDS, because feedback queries go to
+        # get_feedback_summary (relational), not search_policy (vector).
     }
     _is_policy = any(kw in _lower for kw in _POLICY_KEYWORDS)
     # ── MODIFIED 2026-05-29 ──────────────────────────────────────────────────
@@ -792,14 +822,19 @@ JSON:"""
     # Previously get_metro_fare was missing, causing "drink alcohol on metro"
     # to be routed to fare lookup instead of search_policy.
     #
-    # NOTE: get_user_bookings intentionally excluded from this list.
-    # Queries like "show my cancelled bookings" contain "cancel" (a policy
-    # keyword) but the user wants their booking history, not refund policy.
-    # Overriding get_user_bookings would break those legitimate relational
-    # queries.
+    # get_user_bookings is included in the override list BUT protected by
+    # _is_personal_query: if the user says "my booking", "my ticket", etc.,
+    # the override is skipped so personal booking queries still work.
+    # This prevents "I left my phone on the metro" from calling
+    # get_user_bookings (which errors when not logged in).
     # ──────────────────────────────────────────────────────────────────────────
+    _personal_booking_kw = {"my booking", "my ticket", "my trip", "my journey",
+                            "my history", "my reservation", "show booking",
+                            "view booking", "check booking", "list booking",
+                            "show my", "view my"}
+    _is_personal_query = any(kw in _lower for kw in _personal_booking_kw)
     _wrong_tool_for_policy = (
-        _is_policy and tool_calls and
+        _is_policy and not _is_personal_query and tool_calls and
         tool_calls[0].get("name") in (
             "check_national_rail_availability",
             "check_metro_availability",
@@ -807,6 +842,7 @@ JSON:"""
             "get_national_rail_fare",
             "get_metro_fare",
             "calculate_metro_fare",
+            "get_user_bookings",
         )
     )
     if _is_policy and (not tool_calls or _wrong_tool_for_policy):
@@ -814,6 +850,20 @@ JSON:"""
     """
     ── END ADDED 2026-05-28 ──────────────────────────────────────────────────────
     """
+
+    # ── ADDED 2026-05-29 ────────────────────────────────────────────────────────
+    # 5. Feedback queries — route to get_feedback_summary (relational, not vector)
+    #
+    # Problem: questions like "how many 5-star ratings?" have no matching tool,
+    # and the LLM may route them to search_policy or get_user_bookings.
+    #
+    # Fix: detect feedback-related keywords and force get_feedback_summary.
+    # ── END ADDED 2026-05-29 ────────────────────────────────────────────────────
+    _FEEDBACK_KEYWORDS = {"feedback", "rating", "ratings", "review", "reviews",
+                          "star", "stars", "satisfaction"}
+    _is_feedback = any(kw in _lower for kw in _FEEDBACK_KEYWORDS)
+    if _is_feedback and (not tool_calls or tool_calls[0].get("name") != "get_feedback_summary"):
+        tool_calls = [{"name": "get_feedback_summary", "params": {}}]
 
     # Step 2: Execute each tool call against the real databases
     tool_results = []

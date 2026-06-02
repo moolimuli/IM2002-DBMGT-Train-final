@@ -130,8 +130,14 @@ def query_shortest_route(
 
 # ── CHEAPEST ROUTE (fewest stops = lowest fare) ───────────────────────────────
 
-# Approximate per-stop fare used for estimation (graph edges carry no fare data).
-_APPROX_FARE_PER_STOP_USD = 0.50
+# Approximate fare rates derived from NR1 seed data (national_rail_schedules.json).
+# Graph edges carry no fare data, so we use representative constants per fare_class.
+# Metro has no fare_class distinction; national rail supports "standard" and "first".
+_FARE_PARAMS: dict[str, dict] = {
+    "standard": {"base_usd": 2.50, "per_stop_usd": 1.50},
+    "first":    {"base_usd": 4.00, "per_stop_usd": 2.50},
+    "metro":    {"base_usd": 1.50, "per_stop_usd": 0.50},
+}
 
 def query_cheapest_route(
     origin_id: str,
@@ -153,9 +159,18 @@ def query_cheapest_route(
         fare_class:      "standard" or "first" (national rail only)
 
     Returns:
-        dict with found, total_fare_usd (approximate), stations, legs
+        dict with found, total_fare_usd (approximate), fare_class, stations, legs
     """
     rel_type = _rel_type(origin_id)
+    is_metro = rel_type == "METRO_LINK"
+
+    # Metro has no fare class distinction; rail uses the requested fare_class
+    if is_metro:
+        effective_class = "metro"
+    else:
+        effective_class = fare_class if fare_class in _FARE_PARAMS else "standard"
+
+    params = _FARE_PARAMS[effective_class]
 
     with _driver() as driver:
         with driver.session() as session:
@@ -181,12 +196,13 @@ def query_cheapest_route(
 
             stations, legs = _parse_path(record["p"])
             stops = len(legs)
-            approx_fare = round(stops * _APPROX_FARE_PER_STOP_USD, 2)
+            approx_fare = round(params["base_usd"] + stops * params["per_stop_usd"], 2)
 
             return {
                 "found": True,
                 "origin_id": origin_id,
                 "destination_id": destination_id,
+                "fare_class": effective_class,
                 "stops": stops,
                 "total_fare_usd": approx_fare,
                 "fare_note": "Approximate — based on stop count. Use check_national_rail_availability for exact fares.",
@@ -332,7 +348,9 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
         List of dicts: {station_id, name, hops_away, lines_affected}
         When hops=0, returns only the delayed station itself.
     """
-    # Special case: hops=0 returns only the starting station
+    # hops=0 is a special case: return only the origin station itself (hops_away=0).
+    # The main Cypher query uses minLevel:1, so it would return an empty list for hops=0,
+    # which contradicts the expected behaviour of "returns the delayed station itself".
     if hops == 0:
         with _driver() as driver:
             with driver.session() as session:
