@@ -450,6 +450,90 @@ def query_payment_info(booking_id: str) -> Optional[dict]:
             return dict(row) if row else None
 
 
+"""
+── ADDED 2026-05-29 ──────────────────────────────────────────────────────────
+Feedback query functions for the agent to retrieve passenger ratings and
+comments from the schema1.feedback table.
+
+Problem: feedback data existed in PostgreSQL but the agent had no tool to
+query it, so questions like "how many 5-star ratings?" could not be answered.
+
+Fix: add query_feedback_summary() to return rating statistics and recent
+comments, enabling a new get_feedback_summary tool in agent.py.
+── END ADDED 2026-05-29 ──────────────────────────────────────────────────────
+"""
+
+
+def query_feedback_summary(booking_id: str = None) -> dict:
+    """
+    Return feedback statistics and recent comments.
+
+    Args:
+        booking_id: (optional) filter by specific booking ID (BK* or MT*)
+
+    Returns:
+        Dict with rating_summary (count per star), average_rating,
+        total_feedback_count, and recent_comments (latest 10).
+    """
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if booking_id:
+                # Feedback for a specific booking
+                cur.execute("""
+                    SELECT f.feedback_id, f.booking_id, f.booking_type,
+                           f.rating, f.comment, f.submitted_at,
+                           u.full_name AS user_name
+                    FROM schema1.feedback f
+                    JOIN schema1.users u ON u.user_id = f.user_id
+                    WHERE f.booking_id = %s
+                    ORDER BY f.submitted_at DESC
+                """, (booking_id,))
+                rows = [dict(r) for r in cur.fetchall()]
+                return {
+                    "booking_id": booking_id,
+                    "feedback_count": len(rows),
+                    "feedback": rows,
+                }
+            else:
+                # Overall summary
+                # Rating distribution
+                cur.execute("""
+                    SELECT rating, COUNT(*) AS count
+                    FROM schema1.feedback
+                    GROUP BY rating
+                    ORDER BY rating DESC
+                """)
+                rating_rows = [dict(r) for r in cur.fetchall()]
+                rating_summary = {str(r["rating"]) + "_star": r["count"] for r in rating_rows}
+
+                # Average and total
+                cur.execute("""
+                    SELECT COUNT(*) AS total, ROUND(AVG(rating), 2) AS average_rating
+                    FROM schema1.feedback
+                """)
+                stats = dict(cur.fetchone())
+
+                # Recent comments (latest 10)
+                cur.execute("""
+                    SELECT f.feedback_id, f.booking_id, f.booking_type,
+                           f.rating, f.comment, f.submitted_at,
+                           u.full_name AS user_name
+                    FROM schema1.feedback f
+                    JOIN schema1.users u ON u.user_id = f.user_id
+                    WHERE f.comment IS NOT NULL AND f.comment != ''
+                    ORDER BY f.submitted_at DESC
+                    LIMIT 10
+                """)
+                recent = [dict(r) for r in cur.fetchall()]
+
+                return {
+                    "total_feedback_count": stats["total"],
+                    "average_rating": float(stats["average_rating"]) if stats["average_rating"] else 0,
+                    "rating_summary": rating_summary,
+                    "recent_comments": recent,
+                }
+
+
 # ── TRANSACTIONAL OPERATIONS ──────────────────────────────────────────────────
 
 def execute_booking(
