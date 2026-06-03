@@ -746,6 +746,94 @@ Answer: "Alcohol consumption is not permitted on metro services or at stations."
 > Note: Similarity scores and LLM answer quality tested with Ollama llama3.2:1b and
 > llama3.2:8b. Raw data debug panel screenshots available on request.
 
+---
+
+### 7.5 UI Enhancement: Tabbed Interface, Trip History Panel & Station Lookup
+
+#### Motivation
+
+The original TransitFlow UI had a single chat interface with no way to surface
+structured data outside of free-text conversation. Users had to type natural language
+queries to retrieve information that could be presented more efficiently as interactive
+panels. Three specific gaps were identified:
+
+1. **No persistent booking history view**: Users could ask "show my bookings" via chat,
+   but results appeared inline as text and disappeared when the conversation was cleared.
+2. **No direct station lookup**: Checking which stations connect to a given station
+   required a chat message, adding LLM latency for a query that is purely a database
+   lookup.
+3. **Plain visual design**: The default Gradio theme with no custom styling made the
+   interface feel like a prototype rather than a transit assistant.
+
+#### UI Changes Made
+
+| File Modified | Change |
+|---------------|--------|
+| `skeleton/ui.py` | Replaced single-panel layout with 3-tab structure |
+| `skeleton/ui.py` | Added Trip History panel (Tab 2) with `gr.DataFrame` tables |
+| `skeleton/ui.py` | Added Station Lookup panel (Tab 3) with dropdown + connections table |
+| `skeleton/ui.py` | Added custom CSS with Syne + DM Sans fonts, navy/orange theme, gradient header |
+| `skeleton/ui.py` | Replaced `gr.themes.Soft()` with `gr.themes.Base()` + custom CSS |
+
+#### Tab 2 — My Trip History
+
+A new tab that displays the logged-in user's full booking history in two formatted
+tables — National Rail Bookings and Metro Travels — pulled directly from
+`schema1.national_rail_bookings` and `schema1.metro_travels` via the existing
+`query_user_bookings()` function. No new SQL was required.
+
+```python
+# ui.py — load_trip_history()
+# Calls query_user_bookings(current_user) and formats results into pandas DataFrames
+# for gr.DataFrame display. Requires login; shows error message if not authenticated.
+data = query_user_bookings(current_user)
+nr_df = pd.DataFrame(nr_rows)      # National Rail bookings table
+metro_df = pd.DataFrame(metro_rows) # Metro travels table
+```
+
+This surfaces structured booking data in a scannable, persistent format that the
+chat interface cannot replicate — bookings remain visible even after the conversation
+is cleared.
+
+#### Tab 3 — Station Connection Lookup
+
+A dropdown of all 30 stations (MS01–MS20 metro, NR01–NR10 rail) that, on selection
+and button click, fetches and displays all directly connected stations with travel
+times and line information — backed by the existing `query_station_connections()`
+Neo4j query. No new Cypher was required.
+
+```python
+# ui.py — load_station_connections()
+# Calls query_station_connections(station_id) from databases/graph/queries.py
+# and formats the Neo4j results into a pandas DataFrame for gr.DataFrame display.
+connections = query_station_connections(station_id)
+df = pd.DataFrame(rows)  # Station ID, Name, Travel Time, Line, Network
+```
+
+This adds an interactive query mode that bypasses the LLM entirely for a well-defined
+lookup — faster and more reliable than asking the chat assistant.
+
+#### Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Navy (`#0f1b2d`) + Orange (`#e8622a`) colour scheme | High contrast, professional transit aesthetic; orange accent mirrors physical rail signage |
+| Syne (headers) + DM Sans (body) fonts | Syne's geometric weight gives authority to headings; DM Sans is highly legible at small sizes |
+| Gradient header with decorative circle | Creates visual hierarchy; distinguishes the app header from content without adding clutter |
+| Tab structure over accordion | Tabs keep all three modes always visible and one click away; accordions hide options |
+| `gr.themes.Base()` over `gr.themes.Soft()` | Base theme is more neutral, allowing custom CSS to fully control the visual language |
+
+#### Screenshots
+
+> **Tab 1 — Assistant** (original chat interface, now with enhanced styling)
+> ![Tab 1 Assistant](screenshots/tab1_assistant.png)
+
+> **Tab 2 — My Trip History** (booking history table after login)
+> ![Tab 2 Trip History](screenshots/tab2_trip_history.png)
+
+> **Tab 3 — Station Lookup** (MS01 connections shown in table)
+> ![Tab 3 Station Lookup](screenshots/tab3_station_lookup.png)
+
 <!-- ============================================================
   [提醒] 繳交前請確認：
   1. Section 1 已有 ER 圖截圖，cardinality 標在圖的連線上
