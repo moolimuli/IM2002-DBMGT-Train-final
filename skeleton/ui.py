@@ -1,3 +1,8 @@
+# TASK 6 EXTENSION: Added Trip History panel (Tab 2), Station Lookup panel (Tab 3),
+# and custom CSS theme (Syne + DM Sans fonts, navy/orange colour scheme, gradient header).
+# New functions: load_trip_history(), load_station_connections()
+# Tables queried: schema1.national_rail_bookings, schema1.metro_travels (via query_user_bookings)
+# Neo4j queried: MetroStation, NationalRailStation via query_station_connections
 """
 TransitFlow — Gradio Web Interface
 ====================================
