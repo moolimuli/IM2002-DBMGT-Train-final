@@ -875,7 +875,12 @@ JSON:"""
 
     # 5. Schedule seat availability — explicit NR_SCH/MS_SCH ID overrides wrong tool
     _sch_id_m = re.search(r'\b((?:NR|MS)_SCH\w+)\b', user_message, re.IGNORECASE)
-    if _sch_id_m and any(kw in _lower for kw in {"seat", "seats", "class", "available"}):
+    _already_booking = (
+        tool_calls and
+        tool_calls[0].get("name") == "make_booking" and
+        bool(tool_calls[0].get("params", {}).get("seat_id"))
+    )
+    if _sch_id_m and any(kw in _lower for kw in {"available", "availability"}) and not _already_booking:
         _sch_id = _sch_id_m.group(1).upper()
         _date_m5 = re.search(r'\d{4}-\d{2}-\d{2}', user_message)
         _fare_cls5 = next((w for w in ("first", "standard", "business") if w in _lower), None)
