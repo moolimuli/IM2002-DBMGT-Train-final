@@ -206,6 +206,7 @@ def query_cheapest_route(
                 "stops": stops,
                 "total_fare_usd": approx_fare,
                 "fare_note": "Approximate — based on stop count. Use check_national_rail_availability for exact fares.",
+                "path": stations,
                 "stations": stations,
                 "legs": legs,
             }
@@ -328,6 +329,7 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                 "destination_id": destination_id,
                 "total_time_min": record["weight"],
                 "interchange_points": interchange_ids,
+                "path": stations,
                 "stations": stations,
                 "legs": legs,
             }

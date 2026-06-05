@@ -143,6 +143,10 @@ def query_national_rail_availability(
                         GROUP BY sl.fare_class
                     """, (travel_date, sid))
                     sched["seat_availability"] = [dict(r) for r in cur.fetchall()]
+                    sched["available_seats"] = sum(
+                        r["total_seats"] - r["booked_seats"]
+                        for r in sched["seat_availability"]
+                    )
                     sched["travel_date"] = travel_date
 
             # Warn if travel_date is in the past
@@ -344,7 +348,7 @@ def query_user_profile(user_email: str) -> Optional[dict]:
     with _connect() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT user_id, full_name, email, phone, date_of_birth,
+                SELECT user_id, full_name, full_name AS name, email, phone, date_of_birth,
                        EXTRACT(YEAR FROM date_of_birth)::int AS year_of_birth,
                        registered_at, is_active
                 FROM schema1.users
@@ -528,6 +532,14 @@ def execute_booking(
                     return False, f"Seat {seat_id} not found."
                 coach = seat_row["coach"]
 
+                cur.execute("""
+                    SELECT 1 FROM schema1.national_rail_bookings
+                    WHERE schedule_id = %s AND seat_id = %s AND coach = %s
+                      AND travel_date = %s AND status != 'cancelled'
+                """, (schedule_id, seat_id, coach, travel_date))
+                if cur.fetchone():
+                    return False, f"Seat {seat_id} is already booked for {travel_date}."
+
             booking_id = _gen_booking_id()
             now = datetime.now(timezone.utc)
 
@@ -644,6 +656,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
                 "booking_id": booking_id,
                 "status": "cancelled",
                 "original_amount_usd": amount,
+                "refund_amount": refund_amount,
                 "refund_amount_usd": refund_amount,
                 "policy_applied": policy,
             }

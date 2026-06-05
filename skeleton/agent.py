@@ -87,14 +87,19 @@ def _inject_station_ids(text: str) -> str:
     """
     result = text
     seen_ids: set[str] = set()
+    seen_names: set[str] = set()
     for name in sorted(_STATION_INDEX, key=len, reverse=True):
         sid = _STATION_INDEX[name]
         if sid in seen_ids:
+            continue
+        # skip shorter names that are substrings of an already-injected longer name
+        if any(name.lower() in longer.lower() for longer in seen_names):
             continue
         pattern = re.compile(re.escape(name), re.IGNORECASE)
         if pattern.search(result):
             result = pattern.sub(f"{name} ({sid})", result)
             seen_ids.add(sid)
+            seen_names.add(name)
     return result
 
 
@@ -709,10 +714,14 @@ JSON:"""
     _route_triggers = {"fastest route", "quickest route", "shortest route", "cheapest route",
                        "best route", "how to get", "directions from", "route from", "route to",
                        "get from", "travel from", "way from", "path from"}
+    _avail_keywords = {"schedule", "timetable", "service", "services",
+                       "trains", "train", "available", "availability",
+                       "what line", "which line", "metro line"}
+
     _is_route = (
         any(kw in _lower for kw in _route_triggers) or
         (_two_stations and "route" in _lower)
-    )
+    ) and not any(kw in _lower for kw in _avail_keywords)
     if _is_route and _two_stations \
             and not _tool_selected("find_route", "origin_id", "destination_id") \
             and not _tool_selected("find_alternative_routes", "origin_id", "destination_id", "avoid_station_id"):
@@ -720,6 +729,16 @@ JSON:"""
         _fallback("find_route",
                   {"origin_id": _station_ids[0].upper(), "destination_id": _station_ids[1].upper(), "optimise_by": _opt},
                   "route query")
+
+    # 1b. Metro schedule query misrouted to find_route — override to check_metro_availability
+    _metro_sched_kws = {"line", "lines", "service", "services", "schedule", "timetable", "run", "runs"}
+    if (tool_calls and tool_calls[0].get("name") == "find_route"
+            and _two_stations
+            and all(sid.upper().startswith("MS") for sid in _station_ids[:2])
+            and any(kw in _lower for kw in _metro_sched_kws)):
+        o, d = _station_ids[0].upper(), _station_ids[1].upper()
+        _fallback("check_metro_availability", {"origin_id": o, "destination_id": d},
+                  "metro schedule query misrouted to find_route")
 
     # 2. Availability / trains / schedules between two stations
     elif not tool_calls and _two_stations:
@@ -814,6 +833,28 @@ JSON:"""
     """
     ── END ADDED 2026-05-28 ──────────────────────────────────────────────────────
     """
+
+    # 5. Schedule seat availability — explicit NR_SCH/MS_SCH ID overrides wrong tool
+    _sch_id_m = re.search(r'\b((?:NR|MS)_SCH\w+)\b', user_message, re.IGNORECASE)
+    if _sch_id_m and any(kw in _lower for kw in {"seat", "seats", "class", "available"}):
+        _sch_id = _sch_id_m.group(1).upper()
+        _date_m5 = re.search(r'\d{4}-\d{2}-\d{2}', user_message)
+        _fare_cls5 = next((w for w in ("first", "standard", "business") if w in _lower), None)
+        _p5: dict = {"schedule_id": _sch_id}
+        if _date_m5:
+            _p5["travel_date"] = _date_m5.group()
+        if _fare_cls5:
+            _p5["fare_class"] = _fare_cls5
+        _fallback("get_available_seats", _p5, "schedule seat availability")
+
+    # 7. Delay ripple — fires on delay keywords + station; not a route or policy query
+    _delay_kws7 = {"delay", "delayed", "affected", "ripple", "knock-on"}
+    if (any(kw in _lower for kw in _delay_kws7) and _station_ids
+            and not _is_route
+            and not _is_policy
+            and not _tool_selected("get_delay_ripple", "delayed_station_id")):
+        _fallback("get_delay_ripple", {"delayed_station_id": _station_ids[0].upper()},
+                  "delay ripple query")
 
     # Step 2: Execute each tool call against the real databases
     tool_results = []
