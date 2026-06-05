@@ -66,3 +66,20 @@ database features: a **feedback query tool** (relational) and **new policy docum
 | Change | Type | Description |
 |--------|------|-------------|
 | `VECTOR_TOP_K=3` → `VECTOR_TOP_K=5` | MODIFIED | Increased search results from 3 to 5 for broader coverage |
+
+### 7. `skeleton/ui.py`
+# TASK 6 EXTENSION
+
+| Change | Type | Description |
+|--------|------|-------------|
+| `load_trip_history(current_user)` | NEW | Fetches national rail bookings and metro travels for the logged-in user via `query_user_bookings()` and displays them as formatted pandas DataFrames in two separate tables |
+| `load_station_connections(station_id)` | NEW | Fetches direct Neo4j connections for a selected station via `query_station_connections()` and displays results as a formatted DataFrame |
+| Tab 2: My Trip History | NEW | New Gradio tab with `gr.DataFrame` tables for `schema1.national_rail_bookings` and `schema1.metro_travels` — surfaces structured booking data outside of chat |
+| Tab 3: Station Lookup | NEW | New Gradio tab with `gr.Dropdown` (all 30 stations) + `gr.DataFrame` for direct connections — bypasses LLM for deterministic station queries |
+| Custom CSS theme | NEW | Replaced `gr.themes.Soft()` with `gr.themes.Base()` + custom CSS: Syne + DM Sans fonts, navy/orange colour scheme, gradient header, styled DataFrames |
+| `STATION_CHOICES` | NEW | Static list mapping all 30 station IDs to display names for the Station Lookup dropdown |
+
+Tables queried:
+- `schema1.national_rail_bookings` (via `query_user_bookings`)
+- `schema1.metro_travels` (via `query_user_bookings`)
+- Neo4j: `MetroStation`, `NationalRailStation` nodes via `METRO_LINK`, `RAIL_LINK` (via `query_station_connections`)
