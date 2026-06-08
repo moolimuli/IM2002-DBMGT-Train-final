@@ -238,12 +238,12 @@ TOOLS = [
         "name": "cancel_booking",
         "description": (
             "USE THIS TOOL when the user explicitly says 'cancel', 'cancel my booking', "
-            "or 'I want to cancel' and provides a booking_id (format: BK-XXXXXX or BK001 etc). "
+            "or 'I want to cancel' and provides a booking_id (format: UUID e.g. 550e8400-e29b-41d4-a716-446655440000). "
             "REQUIRES LOGIN. Do NOT use get_user_bookings instead of this tool. "
             "Only call after the user has explicitly confirmed the cancellation."
         ),
         "parameters": {
-            "booking_id": {"type": "string", "description": "Booking reference e.g. BK-A1B2C3"},
+            "booking_id": {"type": "string", "description": "Booking reference UUID e.g. 550e8400-e29b-41d4-a716-446655440000"},
         },
         "required": ["booking_id"],
     },
