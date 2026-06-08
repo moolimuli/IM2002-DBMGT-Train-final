@@ -237,6 +237,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_booking        ON schema1.feedback (book
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS schema1.policy_documents (
+    -- SERIAL: policy_documents is a static reference table loaded once from seed data;
+    -- it is never exposed externally and is looked up by vector similarity, not by id.
     id          SERIAL       PRIMARY KEY,
     title       VARCHAR(200) NOT NULL,
     category    VARCHAR(50)  NOT NULL,
@@ -253,6 +255,8 @@ CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding ON schema1.policy_docu
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS schema2.credentials (
+    -- SERIAL: credentials is a small internal table accessed exclusively via user_id FK;
+    -- the surrogate id is never exposed externally, so a compact SERIAL integer suffices.
     id          SERIAL       PRIMARY KEY,
     user_id     UUID         NOT NULL REFERENCES schema1.users(user_id) ON DELETE CASCADE,
     stored_hash VARCHAR(255) NOT NULL,
