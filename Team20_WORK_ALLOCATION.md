@@ -12,7 +12,7 @@
 |-----------|-----------|----------------|-------|
 | 余妍萱 | 113403527 | ninininiadk / 101140nnn-commits | yunini20060123@gmail.com |
 | 蘇于涵 | | | |
-| 吳若喬 | | | |
+| 吳若喬 | 113403507| PhoebeJO | phoebe011624@gmail.com |
 
 ---
 
@@ -60,7 +60,7 @@ All members must sum to 100%.
 |--------|-----------|---------------------|
 |余妍萱 | 33% | Task 1: schema design (schema1/schema2 separation, Argon2id architecture, fixed CREATE INDEX syntax); Task 2: all queries.py functions implementation and optimization; Task 2d: Argon2id password hashing and verify_password.py script; O1 bug fixes in execute_cancellation; agent.py tool descriptions optimization; Task 6: UI extension development; Design Doc Section 1 (ER diagram), Section 5 (AI evidence), Section 7.5 (UI enhancement design) |
 |蘇于涵 | 33% | |
-|吳若喬 | 33% | |
+|吳若喬 | 33% | Task 1: schema design (schema1/schema2 separation, Argon2id architecture, fixed CREATE INDEX syntax); Task 2: all queries.py functions implementation and optimization;bug fixes in execute_cancellation; agent.py tool descriptions optimization;queries.py;seed_vectors.py;travel_policies.json;Design Doc Section 7(policies and departure time); TASK6.md;|
 | **Total** | **100%** | |
 
 ---

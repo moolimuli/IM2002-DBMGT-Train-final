@@ -562,7 +562,7 @@ user_id VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRIC
 
 ---
 
-## Section 7 — Task 6 Extension: Vector Search Optimisation, Feedback Query & Departure Time
+## Section 7 — Task 6 Extension: Vector Search Optimisation, Feedback Query & Departure Time ,UI Changes Made, Departure Time
 
 ### 7.1 Motivation
 
