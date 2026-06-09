@@ -60,15 +60,7 @@ All members must sum to 100%.
 |--------|-----------|---------------------|
 |余妍萱 | 33% | Task 1: schema design (schema1/schema2 separation, Argon2id architecture, fixed CREATE INDEX syntax); Task 2: all queries.py functions implementation and optimization; Task 2d: Argon2id password hashing and verify_password.py script; O1 bug fixes in execute_cancellation; agent.py tool descriptions optimization; Task 6: UI extension development; Design Doc Section 1 (ER diagram), Section 5 (AI evidence), Section 7.5 (UI enhancement design) |
 |蘇于涵 | 33% | |
-|吳若喬 | 33% |Task 3: seed_postgres.py 初始建立與 mock data;
-Task 4: seed_neo4j.py 初始建立;
-Task 6 (DB extension): vector search 優化 (seed_vectors.py topic-level splitting、metadata stripping)、
-feedback query tool (queries.py + agent.py)、
-lost_property & accessibility policies (travel_policies.json)、
-departure time timetable 系統 (generate_departure_times、per-train seat pool、
-Rule 8 deterministic booking override);
-Supporting: Task 1 schema.sql 初版、Task 2b/2c queries.py departure_time 修改;
-Design Doc Section 7 (7.1–7.4, 7.2.6);|
+|吳若喬 | 33% |Task 3: seed_postgres.py, mock data;Task 4: seed_neo4j.py;Task 6 (DB extension): vector search(seed_vectors.py.topic-level splitting、metadata stripping)、feedback query tool (queries.py + agent.py)、lost_property & accessibility policies (travel_policies.json)、departure time timetable(generate_departure_times、per-train seat pool、Rule 8 deterministic booking override);Supporting: Task 1 schema.sql 、Task 2b/2c queries.py departure_time 修改;Design Doc Section 7 (7.1–7.4, 7.2.6);|
 | **Total** | **100%** | |
 
 ---
