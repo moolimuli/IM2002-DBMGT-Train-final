@@ -12,7 +12,7 @@
 |-----------|-----------|----------------|-------|
 | 余妍萱 | 113403527 | ninininiadk / 101140nnn-commits | yunini20060123@gmail.com |
 | 蘇于涵 | | | |
-| 吳若喬 | | | |
+| 吳若喬 | 113403507| PhoebeJO | phoebe011624@gmail.com |
 
 ---
 
@@ -27,27 +27,27 @@ or reassigned mid-project).
 
 | Task | Primary Owner | Supporting Member(s) | Notes |
 |------|--------------|---------------------|-------|
-| **Task 1** — Relational schema design (`schema.sql`) |余妍萱 | | Fixed schema.sql CREATE INDEX syntax errors; implemented schema1/schema2 separation architecture; designed Argon2id password storage approach |
-| **Task 2a** — Core availability & fare queries (`query_national_rail_availability`, `query_metro_schedules`, `query_national_rail_fare`, `query_metro_fare`) |余妍萱 | | Optimized return fields across all query functions (added station names, fare calculations, seat_availability); fixed O1 bug in execute_cancellation using actual departure_time |
-| **Task 2b** — Seat & user queries (`query_available_seats`, `query_user_profile`, `query_user_bookings`, `query_payment_info`) |余妍萱 | | Optimized return fields across all query functions (added station names, fare calculations, seat_availability); fixed O1 bug in execute_cancellation using actual departure_time |
-| **Task 2c** — Write operations (`execute_booking`, `execute_cancellation`) |余妍萱 | | Optimized return fields across all query functions (added station names, fare calculations, seat_availability); fixed O1 bug in execute_cancellation using actual departure_time |
-| **Task 2d** — Authentication queries (`login_user`, `register_user`, `get_user_secret_question`, `verify_secret_answer`, `update_password`) |余妍萱 | | Implemented Argon2id password hashing (schema2.credentials table); created verify_password.py validation script |
-| **Task 3** — PostgreSQL seeding (`seed_postgres.py`) |  |余妍萱 | Supporting contribution to seed data implementation |
-| **Task 4** — Neo4j graph design & seeding (`seed_neo4j.py`, `seed.cypher`) | | | |
+| **Task 1** — Relational schema design (`schema.sql`) |余妍萱 | 吳若喬|  |
+| **Task 2a** — Core availability & fare queries (`query_national_rail_availability`, `query_metro_schedules`, `query_national_rail_fare`, `query_metro_fare`) |余妍萱 | | |
+| **Task 2b** — Seat & user queries (`query_available_seats`, `query_user_profile`, `query_user_bookings`, `query_payment_info`) |余妍萱 |吳若喬 |  |
+| **Task 2c** — Write operations (`execute_booking`, `execute_cancellation`) |余妍萱 |吳若喬 | |
+| **Task 2d** — Authentication queries (`login_user`, `register_user`, `get_user_secret_question`, `verify_secret_answer`, `update_password`) |余妍萱 | | |
+| **Task 3** — PostgreSQL seeding (`seed_postgres.py`) |吳若喬  |余妍萱 |  |
+| **Task 4** — Neo4j graph design & seeding (`seed_neo4j.py`, `seed.cypher`) | 吳若喬| | |
 | **Task 5** — Neo4j query functions (`graph/queries.py`) | | | |
-| **Task 6** *(if attempted)* — Optional extension |余妍萱 (UI) | |UI Enhancement: Trip History panel, Station Lookup panel, custom CSS theme |
+| **Task 6** *(if attempted)* — Optional extension |余妍萱 (UI) 、吳若喬| | |
 
 ### Design Document
 
 | Section | Primary Author | Supporting Member(s) | Notes |
 |---------|--------------|---------------------|-------|
-| Section 1 — ER Diagram |余妍萱 | |Generated via dbdiagram.io |
+| Section 1 — ER Diagram |余妍萱 | ||
 | Section 2 — Normalisation Justification | | | |
 | Section 3 — Graph Database Design Rationale | | | |
-| Section 4 — Vector / RAG Design | | | |
-| Section 5 — AI Tool Usage Evidence |余妍萱 | | examples : Schema Design (Argon2id), Query Writing (query_national_rail_availability), AI error correction |
+| Section 4 — Vector / RAG Design |吳若喬 | | |
+| Section 5 — AI Tool Usage Evidence |余妍萱、吳若喬 | | |
 | Section 6 — Reflection & Trade-offs | | | |
-| Section 7 — Optional Extension *(if applicable)* |余妍萱 (7.5) | |Section 7.5: UI Enhancement design decisions and screenshots |
+| Section 7 — Optional Extension *(if applicable)* |余妍萱 (7.5)、吳若喬 | | |
 
 ---
 
@@ -60,7 +60,15 @@ All members must sum to 100%.
 |--------|-----------|---------------------|
 |余妍萱 | 33% | Task 1: schema design (schema1/schema2 separation, Argon2id architecture, fixed CREATE INDEX syntax); Task 2: all queries.py functions implementation and optimization; Task 2d: Argon2id password hashing and verify_password.py script; O1 bug fixes in execute_cancellation; agent.py tool descriptions optimization; Task 6: UI extension development; Design Doc Section 1 (ER diagram), Section 5 (AI evidence), Section 7.5 (UI enhancement design) |
 |蘇于涵 | 33% | |
-|吳若喬 | 33% | |
+|吳若喬 | 33% |Task 3: seed_postgres.py 初始建立與 mock data;
+Task 4: seed_neo4j.py 初始建立;
+Task 6 (DB extension): vector search 優化 (seed_vectors.py topic-level splitting、metadata stripping)、
+feedback query tool (queries.py + agent.py)、
+lost_property & accessibility policies (travel_policies.json)、
+departure time timetable 系統 (generate_departure_times、per-train seat pool、
+Rule 8 deterministic booking override);
+Supporting: Task 1 schema.sql 初版、Task 2b/2c queries.py departure_time 修改;
+Design Doc Section 7 (7.1–7.4, 7.2.6);|
 | **Total** | **100%** | |
 
 ---

@@ -562,7 +562,7 @@ user_id VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRIC
 
 ---
 
-## Section 7 — Task 6 Extension: Vector Search Optimisation & Feedback Query
+## Section 7 — Task 6 Extension: Vector Search Optimisation, Feedback Query & Departure Time ,UI Changes Made, Departure Time
 
 ### 7.1 Motivation
 
@@ -582,6 +582,14 @@ database:
 3. **No feedback query capability**: The `schema1.feedback` table contained 30 passenger
    ratings and comments, but the agent had no tool to query them. Questions like
    "How many 5-star ratings?" could not be answered.
+
+4. **Booking departure time ambiguity**: The `national_rail_schedules` table stores
+   `first_train_time`, `last_train_time`, and `frequency_min`, but `execute_booking()`
+   always recorded `first_train_time` as the departure time — regardless of which train
+   the user intended. With 30-minute frequency, NR_SCH01 has 34 daily trains, yet all
+   bookings were stored as "06:00". Seat availability was also shared across all daily
+   trains instead of being per-departure. This was identified as a key design issue in
+   the course discussion forum.
 
 These are **system-level database and pipeline issues**, not LLM prompt-tuning problems.
 Fixing them required changes to the seeding scripts, policy data, query functions, and
@@ -672,6 +680,43 @@ the small LLM correctly interpret conditions:
 Without these examples, the LLM interpreted "2 hours before" as falling into the
 "<2 hours" window (0% refund) instead of the "≥2 hours" window (50% refund).
 
+#### 7.2.6 Relational Database — Departure Time Timetable (queries.py + agent.py)
+
+**Problem:** `execute_booking()` always stored `first_train_time` (e.g. 06:00) as the
+departure time for every booking, regardless of which train the user actually wanted.
+All 34 daily NR_SCH01 trains shared a single seat pool.
+
+**Solution:** A computed timetable approach — no new table or seed changes needed.
+
+```python
+def generate_departure_times(schedule_id: str) -> list[str]:
+    """Compute all departure times from first_train_time + frequency_min."""
+    # For NR_SCH01 (06:00–22:30, every 30 min) → 34 entries:
+    # ["06:00", "06:30", "07:00", ..., "22:00", "22:30"]
+    times = []
+    t = first_min
+    while t <= last_min:
+        hh, mm = divmod(t, 60)
+        times.append(f"{hh:02d}:{mm:02d}")
+        t += freq
+    return times
+```
+
+Key changes across the booking pipeline:
+
+| Function | Change |
+|----------|--------|
+| `query_national_rail_availability()` | Returns `departure_times` list in response |
+| `query_available_seats()` | Accepts optional `departure_time` — each train gets its own seat pool |
+| `execute_booking()` | Accepts `departure_time`, validates against computed timetable, stores actual time |
+| Agent Rule 8 | Deterministic override: extracts `departure_time` from user message when LLM omits it |
+
+**Before vs After:**
+```
+Before: INSERT INTO bookings (..., departure_time) VALUES (..., '06:00')  -- always first_train_time
+After:  INSERT INTO bookings (..., departure_time) VALUES (..., '08:00')  -- user-selected time
+```
+
 ---
 
 ### 7.3 Example Queries
@@ -728,6 +773,39 @@ Result: Travel Policies — Metro — Food And Drink (similarity 0.755)
 Answer: "Alcohol consumption is not permitted on metro services or at stations."
 ```
 
+#### Example 4 — Departure Time Booking (Relational)
+
+Query: "Book NR_SCH01 from NR01 to NR05 on 2026-06-15 at 08:00 standard class"
+
+Step 1 — `check_national_rail_availability` returns 34 departure times:
+```
+departure_times: ["06:00", "06:30", "07:00", ..., "22:00", "22:30"]
+```
+
+Step 2 — `get_available_seats` filters by departure_time:
+```sql
+SELECT seat_id, coach FROM national_rail_seat_layouts sl
+WHERE ... AND NOT EXISTS (
+    SELECT 1 FROM national_rail_bookings b
+    WHERE b.seat_id = sl.seat_id AND b.travel_date = '2026-06-15'
+      AND b.departure_time = '08:00'   -- per-train seat pool
+      AND b.status != 'cancelled'
+)
+```
+
+Step 3 — `execute_booking` stores the actual departure time:
+```sql
+INSERT INTO national_rail_bookings (..., departure_time, ...)
+VALUES (..., '08:00', ...)   -- NOT '06:00' (first_train_time)
+```
+
+Database verification:
+```
+booking_id                           | travel_date | departure_time
+-------------------------------------+-------------+---------------
+08ca657b-70b9-4fa6-86d5-9817806ec940 | 2026-06-15  | 08:00:00  ✅
+```
+
 ---
 
 ### 7.4 Testing Evidence
@@ -742,6 +820,7 @@ Answer: "Alcohol consumption is not permitted on metro services or at stations."
 | "Are metro stations wheelchair accessible?" | N/A (limited data) | ✅ "All step-free, lifts at interchanges" (similarity 0.843) |
 | "Do national rail stations have hearing loops?" | N/A (data didn't exist) | ✅ "Yes, all staffed ticket counters" (similarity 0.691) |
 | "How many 5-star ratings?" | ❌ No tool available | ✅ "12 five-star ratings, average 4.17" |
+| "Book NR_SCH01 NR01→NR05 at 08:00" | ❌ DB stored `departure_time = 06:00` (first_train_time), all trains shared one seat pool | ✅ DB stored `departure_time = 08:00`, per-train seat availability |
 
 > Note: Similarity scores and LLM answer quality tested with Ollama llama3.2:1b and
 > llama3.2:8b. Raw data debug panel screenshots available on request.

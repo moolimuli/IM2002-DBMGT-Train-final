@@ -52,6 +52,8 @@ from databases.relational.queries import (
     query_policy_vector_search,
     # ── ADDED 2026-05-29: feedback query for get_feedback_summary tool ────
     query_feedback_summary,
+    # ── ADDED 2026-06-09: departure time timetable generator ────
+    generate_departure_times,
 )
 from databases.graph.queries import (
     query_shortest_route,
@@ -92,14 +94,19 @@ def _inject_station_ids(text: str) -> str:
     """
     result = text
     seen_ids: set[str] = set()
+    seen_names: set[str] = set()
     for name in sorted(_STATION_INDEX, key=len, reverse=True):
         sid = _STATION_INDEX[name]
         if sid in seen_ids:
+            continue
+        # skip shorter names that are substrings of an already-injected longer name
+        if any(name.lower() in longer.lower() for longer in seen_names):
             continue
         pattern = re.compile(re.escape(name), re.IGNORECASE)
         if pattern.search(result):
             result = pattern.sub(f"{name} ({sid})", result)
             seen_ids.add(sid)
+            seen_names.add(name)
     return result
 
 
@@ -117,6 +124,8 @@ LOGIN RULE: Routes, fares, schedules, and policies work WITHOUT login for all us
 When DATA FROM TRANSITFLOW DATABASE is provided, use it as the only source of truth. Do not contradict it or say a route was not found if the data shows one.
 For route results: list every station name in order, note any line changes, and give the total travel time.
 If a tool returns found: false, no results, or an empty list, say the information was not found. Never invent stations, routes, schedules, or prices that were not in the database results.
+
+BOOKING FLOW: When a user wants to book, first call check_national_rail_availability — it now returns a departure_times list (all trains for that schedule). Present the available times and ask the user which train they want. Then pass their chosen departure_time to make_booking. Do NOT skip asking the user which train — each train has its own seat pool.
 Always reply in the same language as the user.
 """.format(today=date.today().isoformat())
 ###nini fix end
@@ -200,9 +209,11 @@ TOOLS = [
             "Always call this before make_booking when user wants to select a specific seat."
 ),      ###nini fix end
         "parameters": {
-            "schedule_id":  {"type": "string", "description": "e.g. NR_SCH01"},
-            "travel_date":  {"type": "string", "description": "YYYY-MM-DD"},
-            "fare_class":   {"type": "string", "description": "standard or first"},
+            "schedule_id":     {"type": "string", "description": "e.g. NR_SCH01"},
+            "travel_date":     {"type": "string", "description": "YYYY-MM-DD"},
+            "fare_class":      {"type": "string", "description": "standard or first"},
+            # ── ADDED 2026-06-09: departure_time for per-train seat availability ──
+            "departure_time":  {"type": "string", "description": "HH:MM (optional) — specific train departure time, e.g. 08:30"},
         },
         "required": ["schedule_id", "travel_date", "fare_class"],
     },
@@ -224,6 +235,8 @@ TOOLS = [
             ###nini fix
             "seat_id": {"type": "string", "description": "Specific seat ID (e.g. B05) or 'any' for auto-assign. DEFAULT: use 'any' if user does not specify a seat."},
             ###nini fix end
+            # ── ADDED 2026-06-09: departure_time for specific train booking ──
+            "departure_time":         {"type": "string", "description": "HH:MM — the specific train departure time (e.g. 08:30). Get from check_national_rail_availability first."},
             "ticket_type":            {"type": "string", "description": "single or return (default single)"},
         },
         "required": ["schedule_id", "origin_station_id", "destination_station_id", "travel_date", "fare_class", "seat_id"],
@@ -233,12 +246,12 @@ TOOLS = [
         "name": "cancel_booking",
         "description": (
             "USE THIS TOOL when the user explicitly says 'cancel', 'cancel my booking', "
-            "or 'I want to cancel' and provides a booking_id (format: BK-XXXXXX or BK001 etc). "
+            "or 'I want to cancel' and provides a booking_id (format: UUID e.g. 550e8400-e29b-41d4-a716-446655440000). "
             "REQUIRES LOGIN. Do NOT use get_user_bookings instead of this tool. "
             "Only call after the user has explicitly confirmed the cancellation."
         ),
         "parameters": {
-            "booking_id": {"type": "string", "description": "Booking reference e.g. BK-A1B2C3"},
+            "booking_id": {"type": "string", "description": "Booking reference UUID e.g. 550e8400-e29b-41d4-a716-446655440000"},
         },
         "required": ["booking_id"],
     },
@@ -338,8 +351,8 @@ check_national_rail_availability(origin_id, destination_id, travel_date?)
 get_national_rail_fare(schedule_id, fare_class, stops_travelled)
 check_metro_availability(origin_id, destination_id)
 calculate_metro_fare(schedule_id, stops_travelled)
-get_available_seats(schedule_id, travel_date, fare_class)
-make_booking(schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, ticket_type?)  # USE when user says book/reserve/buy ticket
+get_available_seats(schedule_id, travel_date, fare_class, departure_time?)
+make_booking(schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, departure_time?, ticket_type?)  # USE when user says book/reserve/buy ticket. ALWAYS ask which departure_time the user wants first.
 cancel_booking(booking_id)
 get_user_bookings()
 search_policy(query)
@@ -355,6 +368,7 @@ def _execute_tool(
     tool_name: str,
     params: dict,
     current_user_email: Optional[str] = None,
+    user_message: str = "",                        # ── ADDED 2026-06-09
 ) -> str:
     """
     Execute a tool call and return the result as a JSON string.
@@ -409,6 +423,14 @@ def _execute_tool(
             result = query_user_bookings(current_user_email)
 
         elif tool_name == "get_available_seats":
+            # ── ADDED 2026-06-09: extract departure_time from user message ──
+            if "departure_time" not in params:
+                _time_m = re.search(r'(?:at\s+)?(\d{1,2}):(\d{2})', user_message)
+                if _time_m:
+                    _h, _m = int(_time_m.group(1)), int(_time_m.group(2))
+                    if 0 <= _h <= 23 and 0 <= _m <= 59:
+                        params["departure_time"] = f"{_h:02d}:{_m:02d}"
+            # ── END ADDED 2026-06-09 ────────────────────────────────────────
             result = query_available_seats(**params)
 
         elif tool_name == "make_booking":
@@ -417,6 +439,23 @@ def _execute_tool(
             profile = query_user_profile(current_user_email)
             if not profile:
                 return json.dumps({"error": "User profile not found."})
+
+            # ── ADDED 2026-06-09: deterministic departure_time extraction ───
+            # Small LLMs often omit the optional departure_time parameter even
+            # when the user explicitly states a time like "at 08:00" or "8:30".
+            # Extract it from the user message as a fallback.
+            _dep_time = params.get("departure_time")
+            if not _dep_time:
+                _time_match = re.search(
+                    r'(?:at\s+)?(\d{1,2}):(\d{2})', user_message
+                )
+                if _time_match:
+                    _hh = int(_time_match.group(1))
+                    _mm = int(_time_match.group(2))
+                    if 0 <= _hh <= 23 and 0 <= _mm <= 59:
+                        _dep_time = f"{_hh:02d}:{_mm:02d}"
+            # ── END ADDED 2026-06-09 ────────────────────────────────────────
+
             ok, data = execute_booking(
                 user_id=profile["user_id"],
                 schedule_id=params["schedule_id"],
@@ -426,6 +465,8 @@ def _execute_tool(
                 fare_class=params["fare_class"],
                 seat_id=params["seat_id"],
                 ticket_type=params.get("ticket_type", "single"),
+                # ── ADDED 2026-06-09: pass user-chosen departure time ──
+                departure_time=_dep_time,
             )
             result = data if ok else {"error": data}
 
@@ -687,7 +728,7 @@ JSON:"""
                 "You are a tool router. Call the right tool based on the user message. "
                 f"Logged-in user: {current_user_email or 'none'}. "
                 "My bookings/tickets/travel history → get_user_bookings (no params). "
-                "Book a ticket / make a booking → check_national_rail_availability first, then make_booking. "
+                "Book a ticket / make a booking → check_national_rail_availability first (shows departure_times list), ask user which departure_time, then make_booking. "
                 "Cancel a booking → cancel_booking. "
                 "Policy/rules/conduct/compensation/luggage/bicycle questions → search_policy. "
                 "Route/directions/fastest/quickest/how-to-get/path questions → find_route ONLY (never get_metro_fare). "
@@ -734,10 +775,14 @@ JSON:"""
     _route_triggers = {"fastest route", "quickest route", "shortest route", "cheapest route",
                        "best route", "how to get", "directions from", "route from", "route to",
                        "get from", "travel from", "way from", "path from"}
+    _avail_keywords = {"schedule", "timetable", "service", "services",
+                       "trains", "train", "available", "availability",
+                       "what line", "which line", "metro line"}
+
     _is_route = (
         any(kw in _lower for kw in _route_triggers) or
         (_two_stations and "route" in _lower)
-    )
+    ) and not any(kw in _lower for kw in _avail_keywords)
     if _is_route and _two_stations \
             and not _tool_selected("find_route", "origin_id", "destination_id") \
             and not _tool_selected("find_alternative_routes", "origin_id", "destination_id", "avoid_station_id"):
@@ -745,6 +790,16 @@ JSON:"""
         _fallback("find_route",
                   {"origin_id": _station_ids[0].upper(), "destination_id": _station_ids[1].upper(), "optimise_by": _opt},
                   "route query")
+
+    # 1b. Metro schedule query misrouted to find_route — override to check_metro_availability
+    _metro_sched_kws = {"line", "lines", "service", "services", "schedule", "timetable", "run", "runs"}
+    if (tool_calls and tool_calls[0].get("name") == "find_route"
+            and _two_stations
+            and all(sid.upper().startswith("MS") for sid in _station_ids[:2])
+            and any(kw in _lower for kw in _metro_sched_kws)):
+        o, d = _station_ids[0].upper(), _station_ids[1].upper()
+        _fallback("check_metro_availability", {"origin_id": o, "destination_id": d},
+                  "metro schedule query misrouted to find_route")
 
     # 2. Availability / trains / schedules between two stations
     elif not tool_calls and _two_stations:
@@ -854,19 +909,75 @@ JSON:"""
     ── END ADDED 2026-05-28 ──────────────────────────────────────────────────────
     """
 
-    # ── ADDED 2026-05-29 ────────────────────────────────────────────────────────
-    # 5. Feedback queries — route to get_feedback_summary (relational, not vector)
-    #
-    # Problem: questions like "how many 5-star ratings?" have no matching tool,
-    # and the LLM may route them to search_policy or get_user_bookings.
-    #
-    # Fix: detect feedback-related keywords and force get_feedback_summary.
-    # ── END ADDED 2026-05-29 ────────────────────────────────────────────────────
+    # 5. Schedule seat availability — explicit NR_SCH/MS_SCH ID overrides wrong tool
+    _sch_id_m = re.search(r'\b((?:NR|MS)_SCH\w+)\b', user_message, re.IGNORECASE)
+    _already_booking = (
+        tool_calls and
+        tool_calls[0].get("name") == "make_booking" and
+        bool(tool_calls[0].get("params", {}).get("seat_id"))
+    )
+    if _sch_id_m and any(kw in _lower for kw in {"available", "availability"}) and not _already_booking:
+        _sch_id = _sch_id_m.group(1).upper()
+        _date_m5 = re.search(r'\d{4}-\d{2}-\d{2}', user_message)
+        _fare_cls5 = next((w for w in ("first", "standard", "business") if w in _lower), None)
+        _p5: dict = {"schedule_id": _sch_id}
+        if _date_m5:
+            _p5["travel_date"] = _date_m5.group()
+        if _fare_cls5:
+            _p5["fare_class"] = _fare_cls5
+        _fallback("get_available_seats", _p5, "schedule seat availability")
+
+    # 6. Feedback queries — route to get_feedback_summary (relational, not vector)
     _FEEDBACK_KEYWORDS = {"feedback", "rating", "ratings", "review", "reviews",
                           "star", "stars", "satisfaction"}
     _is_feedback = any(kw in _lower for kw in _FEEDBACK_KEYWORDS)
     if _is_feedback and (not tool_calls or tool_calls[0].get("name") != "get_feedback_summary"):
         tool_calls = [{"name": "get_feedback_summary", "params": {}}]
+
+    # 7. Delay ripple — fires on delay keywords + station; not a route or policy query
+    _delay_kws7 = {"delay", "delayed", "affected", "ripple", "knock-on"}
+    if (any(kw in _lower for kw in _delay_kws7) and _station_ids
+            and not _is_route
+            and not _is_policy
+            and not _tool_selected("get_delay_ripple", "delayed_station_id")):
+        _fallback("get_delay_ripple", {"delayed_station_id": _station_ids[0].upper()},
+                  "delay ripple query")
+
+    # ── ADDED 2026-06-09: Rule 8 — Deterministic booking override ─────────
+    # Problem: when user says "book NR_SCH01 from NR01 to NR05 at 08:00
+    # standard class", the LLM sometimes routes to search_policy or
+    # check_national_rail_availability instead of make_booking.
+    #
+    # Fix: if the message contains "book" + a schedule_id + two station_ids
+    # + a date, force make_booking with extracted params.
+    # ─────────────────────────────────────────────────────────────────────────
+    _BOOKING_KEYWORDS = {"book", "reserve", "purchase", "buy ticket", "buy a ticket"}
+    _wants_booking = any(kw in _lower for kw in _BOOKING_KEYWORDS)
+    _already_make_booking = tool_calls and tool_calls[0].get("name") == "make_booking"
+
+    if (_wants_booking and _sch_id_m and len(_station_ids) >= 2
+            and not _already_make_booking):
+        _sch_id8 = _sch_id_m.group(1).upper()
+        _date_m8 = re.search(r'\d{4}-\d{2}-\d{2}', user_message)
+        _fare8 = next((w for w in ("first", "standard") if w in _lower), "standard")
+        _time_m8 = re.search(r'(?:at\s+)?(\d{1,2}):(\d{2})', user_message)
+        _p8: dict = {
+            "schedule_id": _sch_id8,
+            "origin_station_id": _station_ids[0].upper(),
+            "destination_station_id": _station_ids[1].upper(),
+            "travel_date": _date_m8.group() if _date_m8 else date.today().isoformat(),
+            "fare_class": _fare8,
+            "seat_id": "any",
+        }
+        if _time_m8:
+            _hh8 = int(_time_m8.group(1))
+            _mm8 = int(_time_m8.group(2))
+            if 0 <= _hh8 <= 23 and 0 <= _mm8 <= 59:
+                _p8["departure_time"] = f"{_hh8:02d}:{_mm8:02d}"
+        tool_calls = [{"name": "make_booking", "params": _p8}]
+        if debug:
+            debug_info.append(f"**Rule 8 override:** forced make_booking with {_p8}")
+    # ── END ADDED 2026-06-09 ────────────────────────────────────────────────
 
     # Step 2: Execute each tool call against the real databases
     tool_results = []
@@ -896,7 +1007,7 @@ JSON:"""
         if debug:
             debug_info.append(f"**Calling:** `{tool_name}({params})`")
 
-        result_json = _execute_tool(tool_name, params, current_user_email)
+        result_json = _execute_tool(tool_name, params, current_user_email, user_message)
 
         summary = _summarise_result(tool_name, result_json)
 
@@ -945,7 +1056,7 @@ JSON:"""
         if debug:
             debug_info.append("**Last-resort:** no tool selected — trying search_policy as fallback")
         _last_resort_json = _execute_tool(
-            "search_policy", {"query": user_message}, current_user_email
+            "search_policy", {"query": user_message}, current_user_email, user_message
         )
         import json as _json
         _last_resort_results = _json.loads(_last_resort_json)
