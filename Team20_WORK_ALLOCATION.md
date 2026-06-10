@@ -42,9 +42,9 @@ or reassigned mid-project).
 Before the 'Team AI Workflow' was released, all three members independently built a complete working version of the system (all core features functional, conversational UI working). The three versions were then reviewed together as a team and merged into a single unified codebase.
 The task ownership listed above reflects the specialisation phase that followed the merge:
 
-余妍萱 led relational schema refinement and query optimisation
-蘇于涵 led graph database design, Neo4j queries, and agent.py tool integration
-吳若喬 led vector/RAG pipeline and new feature development
+- 余妍萱 led relational schema refinement and query optimisation 
+- 蘇于涵 led graph database design, Neo4j queries, and agent.py tool integration 
+- 吳若喬 led vector/RAG pipeline and new feature development 
 
 The Supporting Member column reflects that all three members contributed an initial working implementation of every component during the pre-merge phase.
 In the final phase, after specialised optimisation was complete, all three members independently reviewed and debugged the full codebase across all files. Cross-file contributions from this review phase are therefore present in each member's commit history beyond their primary area.
