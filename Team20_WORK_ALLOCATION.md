@@ -11,7 +11,7 @@
 | Full Name | Student ID | GitHub Username | Email |
 |-----------|-----------|----------------|-------|
 | 余妍萱 | 113403527 | ninininiadk / 101140nnn-commits | yunini20060123@gmail.com |
-| 蘇于涵 | | | |
+| 蘇于涵 | 112403042 | moolimuli | wumao4260@gmail.com |
 | 吳若喬 | 113403507| PhoebeJO | phoebe011624@gmail.com |
 
 ---
@@ -27,26 +27,38 @@ or reassigned mid-project).
 
 | Task | Primary Owner | Supporting Member(s) | Notes |
 |------|--------------|---------------------|-------|
-| **Task 1** — Relational schema design (`schema.sql`) |余妍萱 | 吳若喬|  |
-| **Task 2a** — Core availability & fare queries (`query_national_rail_availability`, `query_metro_schedules`, `query_national_rail_fare`, `query_metro_fare`) |余妍萱 | | |
-| **Task 2b** — Seat & user queries (`query_available_seats`, `query_user_profile`, `query_user_bookings`, `query_payment_info`) |余妍萱 |吳若喬 |  |
-| **Task 2c** — Write operations (`execute_booking`, `execute_cancellation`) |余妍萱 |吳若喬 | |
-| **Task 2d** — Authentication queries (`login_user`, `register_user`, `get_user_secret_question`, `verify_secret_answer`, `update_password`) |余妍萱 | | |
-| **Task 3** — PostgreSQL seeding (`seed_postgres.py`) |吳若喬  |余妍萱 |  |
-| **Task 4** — Neo4j graph design & seeding (`seed_neo4j.py`, `seed.cypher`) | 吳若喬| | |
-| **Task 5** — Neo4j query functions (`graph/queries.py`) | | | |
+| **Task 1** — Relational schema design (`schema.sql`) |余妍萱、吳若喬、蘇于涵 |  |  |
+| **Task 2a** — Core availability & fare queries (`query_national_rail_availability`, `query_metro_schedules`, `query_national_rail_fare`, `query_metro_fare`) |余妍萱 | 吳若喬、蘇于涵 | |
+| **Task 2b** — Seat & user queries (`query_available_seats`, `query_user_profile`, `query_user_bookings`, `query_payment_info`) |余妍萱 |吳若喬、蘇于涵 |  |
+| **Task 2c** — Write operations (`execute_booking`, `execute_cancellation`) |余妍萱 |吳若喬、蘇于涵 | |
+| **Task 2d** — Authentication queries (`login_user`, `register_user`, `get_user_secret_question`, `verify_secret_answer`, `update_password`) |余妍萱 | 吳若喬、蘇于涵 | |
+| **Task 3** — PostgreSQL seeding (`seed_postgres.py`) |吳若喬  |余妍萱、蘇于涵 |  |
+| **Task 4** — Neo4j graph design & seeding (`seed_neo4j.py`, `seed.cypher`) | 吳若喬、蘇于涵 | | |
+| **Task 5** — Neo4j query functions (`graph/queries.py`) | 蘇于涵 | | |
 | **Task 6** *(if attempted)* — Optional extension |余妍萱 (UI) 、吳若喬| | |
+
+#### **Team Workflow Note**
+
+Before the 'Team AI Workflow' was released, all three members independently built a complete working version of the system (all core features functional, conversational UI working). The three versions were then reviewed together as a team and merged into a single unified codebase.
+The task ownership listed above reflects the specialisation phase that followed the merge:
+
+余妍萱 led relational schema refinement and query optimisation
+蘇于涵 led graph database design, Neo4j queries, and agent.py tool integration
+吳若喬 led vector/RAG pipeline and new feature development
+
+The Supporting Member column reflects that all three members contributed an initial working implementation of every component during the pre-merge phase.
+In the final phase, after specialised optimisation was complete, all three members independently reviewed and debugged the full codebase across all files. Cross-file contributions from this review phase are therefore present in each member's commit history beyond their primary area.
 
 ### Design Document
 
 | Section | Primary Author | Supporting Member(s) | Notes |
 |---------|--------------|---------------------|-------|
 | Section 1 — ER Diagram |余妍萱 | ||
-| Section 2 — Normalisation Justification | | | |
-| Section 3 — Graph Database Design Rationale | | | |
+| Section 2 — Normalisation Justification | 蘇于涵 | | |
+| Section 3 — Graph Database Design Rationale | 蘇于涵 | | |
 | Section 4 — Vector / RAG Design |吳若喬 | | |
 | Section 5 — AI Tool Usage Evidence |余妍萱、吳若喬 | | |
-| Section 6 — Reflection & Trade-offs | | | |
+| Section 6 — Reflection & Trade-offs | 蘇于涵 | | |
 | Section 7 — Optional Extension *(if applicable)* |余妍萱 (7.5)、吳若喬 | | |
 
 ---
@@ -59,7 +71,7 @@ All members must sum to 100%.
 | Member | Estimated % | Brief justification |
 |--------|-----------|---------------------|
 |余妍萱 | 33% | Task 1: schema design (schema1/schema2 separation, Argon2id architecture, fixed CREATE INDEX syntax); Task 2: all queries.py functions implementation and optimization; Task 2d: Argon2id password hashing and verify_password.py script; O1 bug fixes in execute_cancellation; agent.py tool descriptions optimization; Task 6: UI extension development; Design Doc Section 1 (ER diagram), Section 5 (AI evidence), Section 7.5 (UI enhancement design) |
-|蘇于涵 | 33% | |
+|蘇于涵 | 33% | Primary owner of graph/queries.py (6 functions, bug fixes) and seed.cypher; agent.py extensions (tool registration, fallback logic, prompt engineering); UUID/SERIAL PK migration across 19 tables; base implementation of all system components; 23/23 unit tests passing; AI_SESSION_CONTEXT.md maintenance; Design Doc Sections 2, 3, 6|
 |吳若喬 | 33% |Task 3: seed_postgres.py, mock data;Task 4: seed_neo4j.py;Task 6 (DB extension): vector search(seed_vectors.py.topic-level splitting、metadata stripping)、feedback query tool (queries.py + agent.py)、lost_property & accessibility policies (travel_policies.json)、departure time timetable(generate_departure_times、per-train seat pool、Rule 8 deterministic booking override);Supporting: Task 1 schema.sql 、Task 2b/2c queries.py departure_time 修改;Design Doc Section 7 (7.1–7.4, 7.2.6);|
 | **Total** | **100%** | |
 
