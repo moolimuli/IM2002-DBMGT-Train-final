@@ -1,4 +1,4 @@
-# Work Allocation Report — [Team ID]
+# Work Allocation Report — [Team 20]
 
 > **Instructions:** Complete this document as a team before or alongside your final submission.
 > Submit one copy per team via EEClass. This document is shared with all markers.
