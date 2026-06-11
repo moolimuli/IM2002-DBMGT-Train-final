@@ -239,9 +239,9 @@ CALL apoc.algo.dijkstra(origin, dest, 'METRO_LINK|RAIL_LINK|INTERCHANGE_TO', 'tr
 #### Query Type 3：Delay Ripple（影響範圍分析）
 
 ```cypher
-MATCH (origin)-[*0..2]-(affected)
+MATCH p = (origin)-[*0..2]-(affected)
 WHERE origin.station_id = $station_id
-RETURN DISTINCT affected, length(path) AS hops_away
+RETURN DISTINCT affected, length(p) AS hops_away
 ```
 
 BFS（廣度優先搜尋）在圖資料庫中只需指定最大 hop 數，在關聯式資料庫中需要 N 層 recursive CTE。
