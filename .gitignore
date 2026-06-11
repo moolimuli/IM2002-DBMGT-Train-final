@@ -59,3 +59,12 @@ gradio_cached_examples/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Submission files — submitted separately via EEClass, not in repo
+Grading/
+Team20_WORK_ALLOCATION.md
+Team20_*_PEER_REVIEW.md
+test_phase1.py
+test_phase2.py
+test_queries.py
+check_model.py
