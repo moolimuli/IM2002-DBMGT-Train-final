@@ -1,25 +1,27 @@
-# AI Session Context — TransitFlow
+# TransitFlow — AI Session Context
 
-**How to use this file:**
-At the start of every AI coding session, paste the full contents of this file as your first message to your AI assistant. This gives the AI the context it needs to produce code that fits your codebase and is consistent with your teammates' work.
-
-**Who maintains this file:**
-Whoever makes a schema change or architectural decision updates this file in the same commit. Treat it like a team contract.
+> **Purpose:** Drop this file into any new AI session to restore full project context
+> instantly. It captures all agreed schema, function signatures, and design decisions
+> so a new session does not need to re-read the codebase from scratch.
+>
+> **Last updated:** 2026-06-11
 
 ---
 
 ## Project Overview
 
-TransitFlow is a Python-based AI chat assistant for a fictional transit operator. It queries three databases — PostgreSQL (relational + vector), Neo4j (graph) — and uses an LLM to answer user questions. Our task as students is to design the database schema and implement the query functions in `databases/relational/queries.py` and `databases/graph/queries.py`.
+TransitFlow is a course AI chat assistant backed by three databases:
 
-## Tech Stack
+| Database | Role | Port |
+|---|---|---|
+| PostgreSQL (relational) | Stations, schedules, seats, users, bookings, payments, feedback | 5433 |
+| PostgreSQL + pgvector | Policy document RAG (768-dim embeddings, Ollama default) | 5433 |
+| Neo4j | Dual transit network graph — route finding, delay ripple | 7688 |
 
-- Language: Python 3.11+
-- Relational DB: PostgreSQL via `psycopg2` with `RealDictCursor`
-- Graph DB: Neo4j via the `neo4j` Python driver
-- Vector search: `pgvector` extension (already implemented — do not modify)
-- Web UI: Gradio
-- LLM: Google Gemini or local Ollama (configured via `.env`)
+**LLM:** Ollama (`llama3.1:8B` local) or Gemini (via `.env`).  
+**UI:** Gradio at `http://localhost:7860`.
+
+---
 
 ## Coding Conventions
 
@@ -28,108 +30,917 @@ TransitFlow is a Python-based AI chat assistant for a fictional transit operator
 - **Return types:** Use type hints. Read-only functions return `list[dict]` or `Optional[dict]`
 - **Empty results:** Return `[]` or `None` (as documented), never raise an exception for "not found"
 - **SQL:** Use `%s` placeholders for all user inputs — never string-format into SQL
+- **Timestamps:** Always use `datetime.now(timezone.utc)`, never `datetime.now()`
+- **Nullable guards:** Always check `if value is None` before calling `.strip()` or any string operation
 - **Relational pattern:** Use `_connect()` helper + `psycopg2.extras.RealDictCursor`:
-  ```python
+```python
   with _connect() as conn:
       with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
           cur.execute("SELECT ...", (param,))
           return [dict(row) for row in cur.fetchall()]
-  ```
+```
 - **Graph pattern:** Use `_driver()` helper + session:
-  ```python
+```python
   with _driver() as driver:
       with driver.session() as session:
           result = session.run("MATCH ...", station_id=station_id)
           return [dict(record) for record in result]
-  ```
+```
+
+---
+
+### File editing rules (from README "Your Tasks")
+
+**Tier 1 — Required** (you must implement these):
+```
+databases/relational/schema.sql
+databases/relational/queries.py
+databases/graph/queries.py
+skeleton/seed_postgres.py
+skeleton/seed_neo4j.py
+databases/graph/seed.cypher              ← listed by README but NOT executed in current implementation (see ⚠️ below)
+train-mock-data/refund_policy.json
+train-mock-data/ticket_types.json
+train-mock-data/booking_rules.json
+train-mock-data/travel_policies.json
+```
+
+> ✅ **seed.cypher note:** `skeleton/seed_neo4j.py` reads and executes `databases/graph/seed.cypher`
+> (constraints + indexes) before seeding node/relationship data. The file is loaded and split on `;`,
+> with blank lines and `//` comments filtered out.
+
+**Tier 2 — Optional** (you may edit, but know what you're doing):
+```
+skeleton/agent.py
+skeleton/ui.py
+```
+> README note: *"If you modify these files, make sure you understand what you are modifying."*
+
+**Tier 3 — Locked** (do NOT modify):
+```
+skeleton/llm_provider.py
+skeleton/config.py
+skeleton/seed_vectors.py
+```
+
+---
 
 ## Agreed Relational Schema
 
-<!-- ============================================================
-  FILL THIS IN after your team completes the schema design workshop.
-  Paste your final CREATE TABLE statements here.
-  ============================================================ -->
+> Source: `databases/relational/schema.sql`  
+> Loaded automatically by Docker from `databases/relational/schema.sql` on first start.  
+> To apply schema changes: `docker compose down -v && docker compose up -d`
+>
+> **Schema layout:** All relational and vector tables live in `schema1`. Credentials (Argon2id
+> hashes) are isolated in `schema2`. The `public` schema is not used.
+
+### Users
 
 ```sql
--- TODO: paste your final schema.sql contents here after team review
+-- schema1.users — profile only, NO password column
+-- UUID: user records are created dynamically at registration; UUID prevents sequential
+-- guessing of other users' IDs and is safe to expose in session tokens.
+CREATE TABLE IF NOT EXISTS schema1.users (
+    user_id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    full_name       VARCHAR(100) NOT NULL,
+    email           VARCHAR(150) NOT NULL UNIQUE,
+    phone           VARCHAR(20),
+    date_of_birth   DATE,
+    secret_question TEXT,
+    secret_answer   VARCHAR(200),                -- nullable; verify_secret_answer guards for NULL
+    registered_at   TIMESTAMPTZ  DEFAULT NOW(),
+    is_active       BOOLEAN      DEFAULT TRUE
+);
+
+-- schema2.credentials — Argon2id hashes, isolated from schema1
+-- SERIAL: small internal table, never exposed externally; compact integer suffices.
+CREATE TABLE IF NOT EXISTS schema2.credentials (
+    id          SERIAL       PRIMARY KEY,
+    user_id     UUID         NOT NULL REFERENCES schema1.users(user_id) ON DELETE CASCADE,
+    stored_hash VARCHAR(255) NOT NULL,           -- Argon2id, ~97 chars; VARCHAR(255) is safe
+    created_at  TIMESTAMPTZ  DEFAULT NOW()
+);
 ```
+
+### Metro
+
+```sql
+-- SERIAL: fixed infrastructure lookup table, loaded once from seed data.
+CREATE TABLE IF NOT EXISTS schema1.metro_stations (
+    id                                   SERIAL       PRIMARY KEY,
+    station_code                         VARCHAR(10)  NOT NULL UNIQUE,
+    name                                 VARCHAR(100) NOT NULL,
+    is_interchange_metro                 BOOLEAN      DEFAULT FALSE,
+    is_interchange_national_rail         BOOLEAN      DEFAULT FALSE,
+    interchange_national_rail_station_id VARCHAR(10)  -- soft reference; NR stations inserted later
+);
+
+CREATE TABLE IF NOT EXISTS schema1.metro_station_lines (
+    station_id  INTEGER    NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE CASCADE,
+    line        VARCHAR(5) NOT NULL,
+    PRIMARY KEY (station_id, line)
+);
+
+-- SERIAL: fixed timetable loaded once from seed data.
+CREATE TABLE IF NOT EXISTS schema1.metro_schedules (
+    id                      SERIAL        PRIMARY KEY,
+    schedule_code           VARCHAR(20)   NOT NULL UNIQUE,
+    line                    VARCHAR(5)    NOT NULL,
+    direction               VARCHAR(20)   NOT NULL,
+    origin_station_id       INTEGER       NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE RESTRICT,
+    destination_station_id  INTEGER       NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE RESTRICT,
+    first_train_time        TIME          NOT NULL,
+    last_train_time         TIME          NOT NULL,
+    base_fare_usd           NUMERIC(6,2)  NOT NULL,
+    per_stop_rate_usd       NUMERIC(6,2)  NOT NULL,
+    frequency_min           INTEGER       NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema1.metro_schedule_days (
+    schedule_id INTEGER    NOT NULL REFERENCES schema1.metro_schedules(id) ON DELETE CASCADE,
+    day_of_week VARCHAR(5) NOT NULL CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun')),
+    PRIMARY KEY (schedule_id, day_of_week)
+);
+
+CREATE TABLE IF NOT EXISTS schema1.metro_schedule_stops (
+    schedule_id                 INTEGER NOT NULL REFERENCES schema1.metro_schedules(id) ON DELETE CASCADE,
+    station_id                  INTEGER NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE RESTRICT,
+    stop_order                  INTEGER NOT NULL,
+    travel_time_from_origin_min INTEGER NOT NULL,
+    PRIMARY KEY (schedule_id, station_id)
+);
+```
+
+### National Rail
+
+```sql
+-- SERIAL: fixed infrastructure lookup table, loaded once from seed data.
+CREATE TABLE IF NOT EXISTS schema1.national_rail_stations (
+    id                           SERIAL       PRIMARY KEY,
+    station_code                 VARCHAR(10)  NOT NULL UNIQUE,
+    name                         VARCHAR(100) NOT NULL,
+    is_interchange_national_rail BOOLEAN      DEFAULT FALSE,
+    is_interchange_metro         BOOLEAN      DEFAULT FALSE,
+    interchange_metro_station_id VARCHAR(10)  -- soft reference to metro_stations
+);
+
+CREATE TABLE IF NOT EXISTS schema1.national_rail_station_lines (
+    station_id  INTEGER    NOT NULL REFERENCES schema1.national_rail_stations(id) ON DELETE CASCADE,
+    line        VARCHAR(5) NOT NULL,
+    PRIMARY KEY (station_id, line)
+);
+
+-- SERIAL: fixed timetable loaded once from seed data.
+CREATE TABLE IF NOT EXISTS schema1.national_rail_schedules (
+    id                      SERIAL       PRIMARY KEY,
+    schedule_code           VARCHAR(20)  NOT NULL UNIQUE,
+    line                    VARCHAR(5)   NOT NULL,
+    service_type            VARCHAR(20)  NOT NULL,  -- 'normal' | 'express'
+    direction               VARCHAR(20)  NOT NULL,
+    origin_station_id       INTEGER      NOT NULL REFERENCES schema1.national_rail_stations(id) ON DELETE RESTRICT,
+    destination_station_id  INTEGER      NOT NULL REFERENCES schema1.national_rail_stations(id) ON DELETE RESTRICT,
+    first_train_time        TIME         NOT NULL,
+    last_train_time         TIME         NOT NULL,
+    frequency_min           INTEGER      NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_days (
+    schedule_id INTEGER    NOT NULL REFERENCES schema1.national_rail_schedules(id) ON DELETE CASCADE,
+    day_of_week VARCHAR(5) NOT NULL CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun')),
+    PRIMARY KEY (schedule_id, day_of_week)
+);
+
+CREATE TABLE IF NOT EXISTS schema1.national_rail_schedule_stops (
+    schedule_id                 INTEGER NOT NULL REFERENCES schema1.national_rail_schedules(id) ON DELETE CASCADE,
+    station_id                  INTEGER NOT NULL REFERENCES schema1.national_rail_stations(id) ON DELETE RESTRICT,
+    stop_order                  INTEGER NOT NULL,
+    travel_time_from_origin_min INTEGER NOT NULL,
+    stop_type                   VARCHAR(15) NOT NULL DEFAULT 'stop'
+                                    CHECK (stop_type IN ('stop', 'pass_through')),
+    PRIMARY KEY (schedule_id, station_id)
+);
+
+CREATE TABLE IF NOT EXISTS schema1.national_rail_fare_classes (
+    schedule_id       INTEGER      NOT NULL REFERENCES schema1.national_rail_schedules(id) ON DELETE CASCADE,
+    fare_class        VARCHAR(20)  NOT NULL,  -- 'standard' | 'first'
+    base_fare_usd     NUMERIC(6,2) NOT NULL,
+    per_stop_rate_usd NUMERIC(6,2) NOT NULL,
+    PRIMARY KEY (schedule_id, fare_class)
+);
+
+CREATE TABLE IF NOT EXISTS schema1.national_rail_seat_layouts (
+    layout_id   VARCHAR(10) NOT NULL,
+    schedule_id INTEGER     NOT NULL REFERENCES schema1.national_rail_schedules(id) ON DELETE CASCADE,
+    coach       VARCHAR(5)  NOT NULL,
+    fare_class  VARCHAR(20) NOT NULL,
+    seat_id     VARCHAR(10) NOT NULL,
+    row_num     INTEGER     NOT NULL,   -- renamed from 'row' to avoid SQL reserved word
+    col_name    VARCHAR(5)  NOT NULL,   -- renamed from 'col' for clarity
+    PRIMARY KEY (schedule_id, coach, seat_id)
+);
+```
+
+### Bookings & Travel History
+
+```sql
+-- UUID: booking records are created dynamically at runtime; UUID prevents sequential
+-- guessing of other users' booking references and is safe to share with customers.
+CREATE TABLE IF NOT EXISTS schema1.national_rail_bookings (
+    booking_id              UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID         NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT,
+    schedule_id             INTEGER      NOT NULL REFERENCES schema1.national_rail_schedules(id) ON DELETE RESTRICT,
+    origin_station_id       INTEGER      NOT NULL REFERENCES schema1.national_rail_stations(id) ON DELETE RESTRICT,
+    destination_station_id  INTEGER      NOT NULL REFERENCES schema1.national_rail_stations(id) ON DELETE RESTRICT,
+    travel_date             DATE         NOT NULL,
+    departure_time          TIME         NOT NULL,
+    ticket_type             VARCHAR(20)  NOT NULL,
+    fare_class              VARCHAR(20)  NOT NULL,
+    coach                   VARCHAR(5),
+    seat_id                 VARCHAR(10),
+    stops_travelled         INTEGER,
+    amount_usd              NUMERIC(8,2) NOT NULL,
+    status                  VARCHAR(20)  NOT NULL,  -- 'confirmed' | 'completed' | 'cancelled'
+    booked_at               TIMESTAMPTZ,
+    travelled_at            TIMESTAMPTZ
+);
+
+-- UUID: travel records are created dynamically at purchase time; consistent with
+-- national_rail_bookings and prevents sequential enumeration of trip records.
+CREATE TABLE IF NOT EXISTS schema1.metro_travels (
+    trip_id                 UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id                 UUID         NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT,
+    schedule_id             INTEGER      NOT NULL REFERENCES schema1.metro_schedules(id) ON DELETE RESTRICT,
+    origin_station_id       INTEGER      NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE RESTRICT,
+    destination_station_id  INTEGER      NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE RESTRICT,
+    travel_date             DATE         NOT NULL,
+    ticket_type             VARCHAR(20)  NOT NULL,  -- 'single' | 'day_pass'
+    day_pass_ref            UUID,                   -- references another trip_id for day_pass legs
+    stops_travelled         INTEGER,
+    amount_usd              NUMERIC(8,2) NOT NULL,
+    status                  VARCHAR(20)  NOT NULL,
+    purchased_at            TIMESTAMPTZ,
+    travelled_at            TIMESTAMPTZ
+);
+```
+
+### Payments & Feedback
+
+```sql
+-- UUID: payment records are created dynamically alongside bookings; UUID matches the
+-- UUID booking_id they reference and prevents sequential enumeration.
+CREATE TABLE IF NOT EXISTS schema1.payments (
+    payment_id    UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id    UUID         NOT NULL,  -- soft ref to national_rail_bookings or metro_travels (cross-table)
+    booking_type  VARCHAR(10)  NOT NULL CHECK (booking_type IN ('rail', 'metro')),
+    amount_usd    NUMERIC(8,2) NOT NULL,
+    method        VARCHAR(30)  NOT NULL,  -- 'credit_card' | 'debit_card' | 'ewallet'
+    status        VARCHAR(20)  NOT NULL,  -- 'paid' | 'refunded'
+    paid_at       TIMESTAMPTZ
+);
+
+-- UUID: feedback records are created dynamically after travel; UUID is consistent
+-- with the UUID booking references they link to.
+CREATE TABLE IF NOT EXISTS schema1.feedback (
+    feedback_id   UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id    UUID        NOT NULL,  -- soft ref to national_rail_bookings or metro_travels
+    booking_type  VARCHAR(10) NOT NULL CHECK (booking_type IN ('rail', 'metro')),
+    user_id       UUID        NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT,
+    rating        SMALLINT    NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    comment       TEXT,
+    submitted_at  TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### Indexes
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_nr_bookings_user_date   ON schema1.national_rail_bookings (user_id, travel_date);
+CREATE INDEX IF NOT EXISTS idx_nr_bookings_seat        ON schema1.national_rail_bookings (schedule_id, travel_date, seat_id);
+CREATE INDEX IF NOT EXISTS idx_metro_travels_user_date ON schema1.metro_travels (user_id, travel_date);
+CREATE INDEX IF NOT EXISTS idx_payments_booking        ON schema1.payments (booking_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_booking        ON schema1.feedback (booking_id);
+```
+
+### Vector (RAG) — do not modify
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS schema1.policy_documents (
+    id          SERIAL       PRIMARY KEY,
+    title       VARCHAR(200) NOT NULL,
+    category    VARCHAR(50)  NOT NULL,
+    content     TEXT         NOT NULL,
+    embedding   vector(768),    -- 768 for Ollama; change to vector(3072) for Gemini
+    source_file VARCHAR(200),
+    created_at  TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding
+    ON schema1.policy_documents USING hnsw (embedding vector_cosine_ops);
+```
+
+> **Gemini note:** If switching to Gemini, change `vector(768)` → `vector(3072)` in schema.sql,
+> then `docker compose down -v && docker compose up -d` and re-run `seed_vectors.py`.
+
+---
 
 ## Agreed Graph Schema
 
-<!-- ============================================================
-  FILL THIS IN after your team agrees on Neo4j node labels and
-  relationship types.
-  ============================================================ -->
+> Source: `skeleton/seed_neo4j.py`, `databases/graph/queries.py`  
+> Network: city metro (M1–M4, stations MS01–MS20) + national rail (NR1–NR2, stations NR01–NR10)
 
-```
-Node labels:
-- TODO
+### Node Labels
 
-Relationship types:
-- TODO
+| Label | Properties |
+|---|---|
+| `MetroStation` | `station_id` (String, PK), `name` (String), `lines` (List\<String\>), `is_interchange_metro` (Boolean), `is_interchange_national_rail` (Boolean), `interchange_national_rail_station_id` (String, nullable) |
+| `NationalRailStation` | `station_id` (String, PK), `name` (String), `lines` (List\<String\>), `is_interchange_national_rail` (Boolean), `is_interchange_metro` (Boolean), `interchange_metro_station_id` (String, nullable) |
 
-Key properties:
-- TODO
-```
+### Relationship Types
 
-## Function Signatures We Are Implementing
+| Type | Between | Properties |
+|---|---|---|
+| `METRO_LINK` | MetroStation → MetroStation | `line` (String), `travel_time_min` (Integer) |
+| `RAIL_LINK` | NationalRailStation → NationalRailStation | `line` (String), `travel_time_min` (Integer) |
+| `INTERCHANGE_TO` | MetroStation ↔ NationalRailStation | `travel_time_min = 5` (both directions, hardcoded) |
 
-These are fixed contracts. AI-generated code must match these signatures exactly.
+### Seed counts (from train-mock-data/)
 
-### Relational (`databases/relational/queries.py`)
+| Element | Count |
+|---|---|
+| MetroStation nodes | 20 |
+| NationalRailStation nodes | 10 |
+| METRO_LINK relationships | 42 |
+| RAIL_LINK relationships | 18 |
+| INTERCHANGE_TO pairs | 3 (6 directed edges) |
 
-```python
-# Read-only
-def query_national_rail_availability(origin_id: str, destination_id: str, travel_date: Optional[str] = None) -> list[dict]: ...
-def query_national_rail_fare(schedule_id: str, fare_class: str, stops_travelled: int) -> Optional[dict]: ...
-def query_metro_schedules(origin_id: str, destination_id: str) -> list[dict]: ...
-def query_metro_fare(schedule_id: str, stops_travelled: int) -> Optional[dict]: ...
-def query_available_seats(schedule_id: str, travel_date: str, fare_class: str) -> list[dict]: ...
-def query_user_profile(user_email: str) -> Optional[dict]: ...
-def query_user_bookings(user_email: str) -> dict: ...  # returns {"national_rail": [...], "metro": [...]}
-def query_payment_info(booking_id: str) -> Optional[dict]: ...
+### Key implementation notes
 
-# Write operations
-def execute_booking(user_id, schedule_id, origin_station_id, destination_station_id, travel_date, fare_class, seat_id, ticket_type="single") -> tuple[bool, dict | str]: ...
-def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | str]: ...
+- Station ID prefix determines network: `MS*` → metro, `NR*` → national rail.
+- `_rel_type(station_id)` in `graph/queries.py` infers the correct relationship type from the prefix. It raises `ValueError` if `station_id` is `None`.
+- Route finding uses `apoc.algo.dijkstra` (APOC plugin, enabled in `docker-compose.yml`).
+- Cross-network routing uses `'METRO_LINK|RAIL_LINK|INTERCHANGE_TO'` as the relationship filter.
 
-# Auth
-def register_user(email, first_name, surname, year_of_birth, password, secret_question, secret_answer) -> tuple[bool, str]: ...
-def login_user(email: str, password: str) -> Optional[dict]: ...
-def get_user_secret_question(email: str) -> Optional[str]: ...
-def verify_secret_answer(email: str, answer: str) -> bool: ...
-def update_password(email: str, new_password: str) -> bool: ...
-```
+---
 
-### Graph (`databases/graph/queries.py`)
+## Function Signatures
+
+### `databases/relational/queries.py`
 
 ```python
-def query_shortest_route(origin_id: str, destination_id: str, network: str = "auto") -> dict: ...
-def query_cheapest_route(origin_id: str, destination_id: str, network: str = "auto", fare_class: str = "standard") -> dict: ...
-def query_alternative_routes(origin_id, destination_id, avoid_station_id, network="auto", max_routes=3) -> list[list[dict]]: ...
-def query_interchange_path(origin_id: str, destination_id: str) -> dict: ...
-def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]: ...
-def query_station_connections(station_id: str) -> list[dict]: ...
+# ── Availability & Fares ──────────────────────────────────────────────────────
+
+def query_national_rail_availability(
+    origin_id: str,
+    destination_id: str,
+    travel_date: Optional[str] = None,      # ISO date string e.g. "2026-06-01"
+) -> list[dict]:
+    """
+    Returns schedules where origin stop comes before destination stop.
+    Each result includes: schedule_id, line, service_type, direction,
+    first/last_train_time, frequency_min, origin/destination names,
+    stop orders, stops_travelled, travel_time_min, fares (list), and
+    seat_availability (list, only if travel_date provided).
+    Adds date_warning field to each result if travel_date is in the past.
+    """
+
+def query_national_rail_fare(
+    schedule_id: str,
+    fare_class: str,
+    stops_travelled: int,
+) -> Optional[dict]:
+    """Returns {fare_class, base_fare_usd, per_stop_rate_usd, total_fare_usd} or None."""
+
+def query_metro_schedules(
+    origin_id: str,
+    destination_id: str,
+) -> list[dict]:
+    """Returns metro schedules serving both stations in correct order, with total_fare_usd."""
+
+def query_metro_fare(
+    schedule_id: str,
+    stops_travelled: int,
+) -> Optional[dict]:
+    """Returns {base_fare_usd, per_stop_rate_usd, total_fare_usd} or None."""
+
+# ── Seat Selection ────────────────────────────────────────────────────────────
+
+def query_available_seats(
+    schedule_id: str,
+    travel_date: str,
+    fare_class: str,
+    departure_time: Optional[str] = None,   # HH:MM — filters per-train seat pool (ADDED 2026-06-09)
+) -> list[dict]:
+    """Returns [{seat_id, coach, row, column}, ...] for seats not already booked.
+    When departure_time is provided, only bookings for that specific train are excluded."""
+
+def auto_select_adjacent_seats(
+    available_seats: list[dict],
+    count: int,
+) -> list[str]:
+    """Picks seats from the same row if possible. Returns list of seat_id strings."""
+
+# ── User & Booking Queries ────────────────────────────────────────────────────
+
+def query_user_profile(user_email: str) -> Optional[dict]:
+    """Returns user dict (no password) or None if not found."""
+
+def query_user_bookings(user_email: str) -> dict:
+    """Returns {"national_rail": [...], "metro": [...]} booking history."""
+
+def query_payment_info(booking_id: str) -> Optional[dict]:
+    """Returns {payment_id, booking_id, booking_type, amount_usd, method, status, paid_at} or None."""
+
+# ── Transactional Operations ──────────────────────────────────────────────────
+
+def execute_booking(
+    user_id: str,
+    schedule_id: str,
+    origin_station_id: str,
+    destination_station_id: str,
+    travel_date: str,
+    fare_class: str,
+    seat_id: str,                   # pass "any" to auto-assign
+    ticket_type: str = "single",
+    departure_time: Optional[str] = None,   # HH:MM — specific train time (ADDED 2026-06-09)
+) -> tuple[bool, dict | str]:
+    """
+    Creates national_rail_bookings row and payments row (method always 'credit_card').
+    departure_time is validated against the schedule's computed timetable; falls back
+    to first_train_time if omitted. Each train has its own seat pool.
+    Returns (True, booking_dict) on success, (False, error_message) on failure.
+    """
+
+def execute_cancellation(
+    booking_id: str,
+    user_id: str,
+) -> tuple[bool, dict | str]:
+    """
+    Cancels booking, sets payment status to 'refunded'.
+    Refund policy applied:
+      Normal (RF001): ≥48h → 100% | 24–48h → 75% | 2–24h → 50% | <2h → 0%
+      Express (RF002): ≥48h → 100% | 2–48h → 50% | <2h → 0%
+    Returns (True, result_dict) or (False, error_message).
+    """
+
+# ── Authentication ────────────────────────────────────────────────────────────
+
+def register_user(
+    email: str,
+    first_name: str,
+    surname: str,
+    year_of_birth: int,
+    password: str,                  # hashed with Argon2id before storing
+    secret_question: str,
+    secret_answer: str,
+) -> tuple[bool, str]:
+    """
+    Inserts profile into schema1.users, then Argon2id hash into schema2.credentials
+    (single transaction). Returns (True, user_id) or (False, error_message).
+    user_id is a UUID generated by the database (returned via RETURNING user_id).
+    """
+
+def login_user(email: str, password: str) -> Optional[dict]:
+    """
+    JOINs schema1.users with schema2.credentials, calls ph.verify() to check hash.
+    Returns user dict with first_name/surname split from full_name (stored_hash
+    stripped before returning), or None on mismatch / inactive user.
+    """
+
+def get_user_secret_question(email: str) -> Optional[str]:
+    """Returns the secret question string or None if email not found."""
+
+def verify_secret_answer(email: str, answer: str) -> bool:
+    """
+    Case-insensitive comparison. Returns False (not crash) if secret_answer
+    is NULL in the database — secret_answer column is nullable.
+    """
+
+def update_password(email: str, new_password: str) -> bool:
+    """
+    Hashes new_password with Argon2id and updates schema2.credentials.
+    Returns True if a row was updated, False otherwise.
+    """
+
+# ── Task 6 Extensions ────────────────────────────────────────────────────────
+
+def generate_departure_times(schedule_id: str) -> list[str]:
+    """
+    Compute all departure times from first_train_time, last_train_time, frequency_min.
+    No new table — times are derived from existing schedule metadata.
+    Returns sorted list of "HH:MM" strings e.g. ["06:00", "06:30", "07:00", ...]
+    Used by execute_booking to validate departure_time and by query_national_rail_availability
+    to populate the departure_times field in each result. (ADDED 2026-06-09)
+    """
+
+def query_feedback_summary(booking_id: str = None) -> dict:
+    """
+    Return feedback statistics and recent comments.
+    If booking_id provided: returns feedback for that specific booking.
+    Otherwise: returns overall rating_summary, average_rating, total_feedback_count,
+    and recent_comments (latest 10 with non-empty comment). (ADDED 2026-05-29)
+    """
+
+# ── Vector / RAG ─────────────────────────────────────────────────────────────
+
+def query_policy_vector_search(
+    embedding: list[float],
+    top_k: int = VECTOR_TOP_K,     # default from config (3)
+) -> list[dict]:
+    """Cosine similarity search. Filters by VECTOR_SIMILARITY_THRESHOLD (default 0.5)."""
+
+def store_policy_document(
+    title: str,
+    category: str,
+    content: str,
+    embedding: list[float],
+    source_file: str = "",
+) -> int:
+    """Inserts a policy document and returns its auto-generated id."""
 ```
+
+---
+
+### `databases/graph/queries.py`
+
+```python
+def query_shortest_route(
+    origin_id: str,
+    destination_id: str,
+    network: str = "auto",          # "metro" | "rail" | "auto" (inferred from ID prefix)
+) -> dict:
+    """
+    Dijkstra by travel_time_min via apoc.algo.dijkstra.
+    Returns: {found, origin_id, destination_id, total_time_min, path, legs}
+    or {found: False, error} if no route.
+    """
+
+def query_cheapest_route(
+    origin_id: str,
+    destination_id: str,
+    network: str = "auto",
+    fare_class: str = "standard",
+) -> dict:
+    """
+    Shortest hop count via shortestPath (fewest stops ≈ lowest fare).
+    Returns approximate fare at $0.50/stop. Exact fares from relational DB.
+    Returns: {found, stops, total_fare_usd, fare_note, stations, legs}
+    """
+
+def query_alternative_routes(
+    origin_id: str,
+    destination_id: str,
+    avoid_station_id: str,
+    network: str = "auto",
+    max_routes: int = 3,
+) -> list[list[dict]]:
+    """
+    Paths avoiding avoid_station_id. Searches up to depth 15, deduplicates,
+    skips cyclic paths, returns up to max_routes sorted by total travel time.
+    Each route is a list of leg dicts.
+    """
+
+def query_interchange_path(
+    origin_id: str,
+    destination_id: str,
+) -> dict:
+    """
+    Cross-network path (metro ↔ national rail) using METRO_LINK|RAIL_LINK|INTERCHANGE_TO.
+    Returns: {found, total_time_min, interchange_points, stations, legs}
+    interchange_points = station IDs at either end of INTERCHANGE_TO legs.
+    """
+
+def query_delay_ripple(
+    delayed_station_id: str,
+    hops: int = 2,
+) -> list[dict]:
+    """
+    All stations within N hops via apoc.path.expandConfig.
+    Returns: [{station_id, name, hops_away, lines_affected}, ...]
+    Works on both metro and national rail networks.
+    """
+
+def query_station_connections(station_id: str) -> list[dict]:
+    """
+    Direct outbound neighbours via METRO_LINK or RAIL_LINK.
+    Returns: [{station_id, name, line, travel_time_min, network}, ...]
+    """
+```
+
+---
 
 ## Team Decisions Log
 
-<!-- Add entries as you make decisions. Format: "Decision: X. Why: Y." -->
+> Ordered chronologically. Each decision records **what**, **why**, and **implications**
+> for future teammates adding features.
 
-- [ ] Schema design: TODO — add your table/column decisions here
-- [ ] Graph schema: TODO — add your node label and relationship type decisions here
-- [ ] (example) Metro schedule stop ordering: using `jsonb_array_elements` approach — easier to debug than containment operators
+---
 
-## Prompts That Worked
+### D00 — PK strategy: UUID for dynamic records, SERIAL for static reference tables
 
-<!-- Share prompts that produced good output so teammates can reuse them. -->
+**Decision:** Primary key types are chosen based on whether a record is created dynamically
+at runtime or loaded once from seed data:
 
-### Schema design prompt that worked:
+| PK type | Tables |
+|---|---|
+| `UUID DEFAULT gen_random_uuid()` | `users`, `national_rail_bookings`, `metro_travels`, `payments`, `feedback` |
+| `SERIAL` | `metro_stations`, `metro_schedules`, `national_rail_stations`, `national_rail_schedules`, `schema2.credentials` |
+
+**Why:** UUID prevents sequential guessing of user IDs and booking references in API responses
+(important for security). SERIAL is used for static lookup tables that are never exposed externally
+and benefit from compact integer B-tree indexes for FK joins.
+
+**FK implication:** Station and schedule FKs use INTEGER (referencing `id`). User and booking FKs
+use UUID (referencing `user_id` / `booking_id`). In queries, look up station/schedule by their
+`station_code` / `schedule_code` VARCHAR, then use the returned integer `id` for FK operations.
+
+---
+
+### D01 — Table naming: `national_rail_*` prefix (not `nr_*`)
+
+**Decision:** All national rail tables use the full prefix `national_rail_` rather than the
+abbreviated `nr_`.
+
+**Why:** `nr_` is ambiguous (could mean "not required", "north region", etc.). Full names are
+self-documenting when someone runs `\dt` in psql and sees the table list without context.
+
+**Affected tables:** `national_rail_stations`, `national_rail_station_lines`,
+`national_rail_schedules`, `national_rail_schedule_days`, `national_rail_schedule_stops`,
+`national_rail_fare_classes`, `national_rail_seat_layouts`, `national_rail_bookings`.
+
+**Implication:** Any new national rail table must follow the same prefix. Do not abbreviate.
+
+---
+
+### D02 — Metro stops stored as a relational table, not JSONB
+
+**Decision:** `metro_schedule_stops` is a proper table with one row per stop, not a JSONB
+column on `metro_schedules`.
+
+**Why:** Relational rows allow foreign key constraints to `metro_stations`, support indexed
+lookups by `station_id`, and are queryable with standard SQL JOINs. JSONB would require
+JSON path operators for every stop-order query.
+
+**Implication:** Adding stops to a schedule means inserting into `metro_schedule_stops`.
+National rail follows the same pattern (`national_rail_schedule_stops`).
+
+---
+
+### D03 — `stop_type` enum replaces `is_express_skip` boolean
+
+**Decision:** `national_rail_schedule_stops.stop_type VARCHAR(15) CHECK IN ('stop', 'pass_through')`
+replaces the original boolean column `is_express_skip`.
+
+**Why:** A boolean can only ever mean "skipped or not". `stop_type` is extensible — future
+values like `'request_stop'` or `'depot_only'` can be added without a schema change. The
+semantics are also clearer: `stop_type = 'stop'` vs `is_express_skip = FALSE`.
+
+**Implication for queries:** Always filter `AND stop_type = 'stop'` when joining stops for
+availability or booking calculations. Pass-through stations have `stop_order = 0` and must
+not be used as origin or destination. Both `query_national_rail_availability` and
+`execute_booking` already apply this filter.
+
+**Note:** A UNIQUE constraint on `stop_order` was explicitly skipped because pass-through
+stations all receive `stop_order = 0` — multiple pass-through stations per schedule would
+violate such a constraint.
+
+---
+
+### D04 — `booking_type` column on `payments` and `feedback`
+
+**Decision:** Both `payments` and `feedback` carry a `booking_type VARCHAR(10) CHECK IN ('rail', 'metro')`
+column.
+
+**Why:** `booking_id` is a soft reference that points to either `national_rail_bookings`
+(prefix `BK`) or `metro_travels` (prefix `MT`). Without `booking_type`, application code
+must parse the booking_id prefix to know which table to join. With `booking_type`, the
+routing is explicit and queryable.
+
+**Inference rule:** Implemented in `seed_postgres.py` as `_infer_booking_type(booking_id)`,
+which raises `ValueError` on unknown prefixes (no silent fallback).
+
+**Implication:** Any new booking type must assign a new prefix and add it to both the
+`booking_type` CHECK constraint and the `_infer_booking_type` helper.
+
+---
+
+### D05 — `INTERCHANGE_TO` carries `travel_time_min = 5`
+
+**Decision:** Both directed edges of each `INTERCHANGE_TO` pair have `travel_time_min = 5`
+(minutes), hardcoded in `skeleton/seed_neo4j.py`.
+
+**Why:** Dijkstra requires a numeric weight on every edge to compute total travel time.
+Without a weight, interchange legs would have zero cost and distort route comparisons.
+5 minutes is a reasonable platform-change estimate.
+
+**Implication:** `query_interchange_path` and `query_shortest_route` (cross-network) correctly
+include the interchange penalty in `total_time_min`. If real interchange times become
+available from data, update the `SET mr.travel_time_min` / `SET rm.travel_time_min` lines
+in `seed_neo4j.py` and re-seed Neo4j.
+
+---
+
+### D06 — `day_of_week` CHECK constraint on schedule_days tables
+
+**Decision:** Both `metro_schedule_days.day_of_week` and `national_rail_schedule_days.day_of_week`
+have `CHECK (day_of_week IN ('mon','tue','wed','thu','fri','sat','sun'))`.
+
+**Why:** Prevents invalid strings like `'Monday'`, `'monday'`, `'1'`, `'MON'` from being
+inserted. Enforces a consistent lowercase 3-letter format across the entire dataset.
+
+**Implication:** Always use lowercase 3-letter abbreviations when inserting operating days.
+The seed scripts read directly from JSON (which already uses this format).
+
+---
+
+### D07 — All timestamps use `TIMESTAMPTZ`
+
+**Decision:** Every timestamp column in the schema is `TIMESTAMPTZ` (timestamp with time zone),
+not `TIMESTAMP` (without time zone).
+
+**Why:** `TIMESTAMP` stores a local time with no timezone information. When the server or
+container timezone changes, stored values become ambiguous. `TIMESTAMPTZ` stores UTC
+internally and converts on retrieval — no ambiguity, no DST bugs.
+
+**Affected columns:** `users.registered_at`, `national_rail_bookings.booked_at`,
+`national_rail_bookings.travelled_at`, `metro_travels.purchased_at`,
+`metro_travels.travelled_at`, `payments.paid_at`, `feedback.submitted_at`,
+`policy_documents.created_at`.
+
+**Implication:** Always pass timezone-aware datetimes from Python:
+`datetime.now(timezone.utc)` not `datetime.now()`.
+
+---
+
+### D08 — Passwords hashed with Argon2id; credentials isolated in schema2
+
+**Decision:** `schema1.users` has **no password column**. Passwords are hashed with Argon2id
+(`argon2-cffi` `PasswordHasher`, default params) and stored in `schema2.credentials.stored_hash VARCHAR(255)`.
+
+**Why:** Plaintext storage is indefensible even in a course setting once the schema is being
+designed from scratch. Isolating credentials into a separate schema (`schema2`) limits blast
+radius — a compromised `schema1` read does not expose hashes.
+
+**Implementation:**
+- `register_user` — inserts profile into `schema1.users`, then `_ph.hash(password)` into
+  `schema2.credentials` in a single transaction.
+- `login_user` — `JOIN schema2.credentials c ON c.user_id = u.user_id`, then
+  `_ph.verify(row["stored_hash"], password)`; pops `stored_hash` before returning.
+- `update_password` — `UPDATE schema2.credentials SET stored_hash = %s WHERE user_id = (SELECT user_id FROM schema1.users WHERE email = %s)`
+- `seed_postgres.py` — `seed_users()` does a two-step insert: profile rows first, then
+  Argon2id hashes.
+
+**Hash size note:** Default argon2-cffi hashes are ~97 chars (`$argon2id$v=19$m=65536,t=3,p=4,...`).
+`VARCHAR(255)` provides ample headroom for parameter increases.
+
+**Implication:** Do not add a `password` column back to `schema1.users`. All auth must go
+through `schema2.credentials`. No search_path reliance — all SQL uses explicit `schema1.` /
+`schema2.` prefixes.
+
+---
+
+### D09 — `secret_answer` is nullable; `verify_secret_answer` returns False for NULL
+
+**Decision:** `users.secret_answer VARCHAR(200)` has no `NOT NULL` constraint.
+`verify_secret_answer` returns `False` (not crash) when the stored value is `NULL`.
+
+**Why:** Some users may be seeded without a secret answer. The function previously crashed
+with `AttributeError` on `None.strip()`. The guard `if row[0] is None: return False`
+makes the password-reset flow fail gracefully instead.
+
+**Implication:** A user with no secret answer cannot reset their password via the secret
+question flow. This is the correct behaviour — do not change it to `True`.
+
+---
+
+### D10 — `row_num` and `col_name` column names in `national_rail_seat_layouts`
+
+**Decision:** Seat position columns are named `row_num` and `col_name`, not `row` and `col`.
+
+**Why:** `row` is a reserved word in PostgreSQL and many SQL dialects. Using it as a column
+name requires quoting everywhere and causes subtle bugs. `col` is non-standard but similarly
+risky. The renamed versions are unambiguous.
+
+**Implication:** When querying seat layouts, always use `sl.row_num` and `sl.col_name`.
+`query_available_seats` aliases them as `row` and `column` for the API response:
+`SELECT sl.row_num AS row, sl.col_name AS column`.
+
+---
+
+## Seed Script Reference
+
+### `skeleton/seed_postgres.py`
+
+Run order (respects FK dependencies):
 ```
-TODO — add a prompt here after your schema design workshop
+metro_stations → metro_station_lines
+national_rail_stations → national_rail_station_lines
+metro_schedules → metro_schedule_days → metro_schedule_stops
+national_rail_schedules → national_rail_schedule_days → national_rail_schedule_stops → national_rail_fare_classes
+national_rail_seat_layouts
+users (schema1.users profile + schema2.credentials Argon2id hash, one transaction)
+national_rail_bookings
+metro_travels
+payments → feedback
 ```
 
-### Query implementation prompt that worked:
+Safe to re-run: all inserts use `ON CONFLICT DO NOTHING`.  
+`booking_type` is inferred by `_infer_booking_type(booking_id)` — raises `ValueError` on unknown prefix.
+
+### `skeleton/seed_neo4j.py`
+
+先讀取並執行 `databases/graph/seed.cypher`（constraints + indexes），再進行資料 seeding。
+
+Clears all graph data first (`MATCH (n) DETACH DELETE n`), then recreates:
+- MetroStation nodes (20)
+- NationalRailStation nodes (10)
+- METRO_LINK edges from `adjacent_stations` in `metro_stations.json`
+- RAIL_LINK edges from `adjacent_stations` in `national_rail_stations.json`
+- INTERCHANGE_TO pairs (bidirectional, `travel_time_min = 5`) from `is_interchange_national_rail` flags
+
+---
+
+## Database Reset Commands
+
+```bash
+# Full reset (schema change or first time):
+docker compose down -v && docker compose up -d
+python3 skeleton/seed_postgres.py
+python3 skeleton/seed_neo4j.py
+python3 skeleton/seed_vectors.py
+
+# Neo4j only (graph change):
+python3 skeleton/seed_neo4j.py
+
+# Vectors only (policy document change):
+python3 skeleton/seed_vectors.py
 ```
-TODO — add after implementing your first function
-```
+
+---
+
+## Known Limitations (acceptable for course scope)
+
+| # | Limitation | Location | Notes |
+|---|---|---|---|
+| L01 | Payment method always `'credit_card'` | `execute_booking` line ~440 | Schema supports debit_card/ewallet but function doesn't expose the choice. Extending requires adding a `payment_method` param and updating agent.py. |
+| L03 | ~~`user_id` generation uses `COUNT(*) + 1`~~ — **resolved**: `user_id` is now `UUID DEFAULT gen_random_uuid()`, no concurrency issue. | `schema1.users` | — |
+| L04 | `stop_order = 0` convention for pass-through stations | `national_rail_schedule_stops` | Not enforced by constraint. Application code must filter `stop_type = 'stop'`. |
+| L05 | UI model list hardcoded to `llama3.2:1b` / `llama3.1:8b` (lowercase) | `skeleton/ui.py` line 67 | Model pulled as `llama3.1:8B` (uppercase) shows as `(not pulled)` in UI — cosmetic only, backend works correctly. |
+| L06 | 8B 模型多步驟查詢失敗 | `skeleton/agent.py` | LLM 無法可靠串接多個 tool call，跨 DB 整合查詢（例如先查路線再訂票）結果不穩定。需要 13B+ 模型才能可靠執行。DB 層功能本身正確。 |
+| L07 | `query_cheapest_route` 票價為估算值 | `databases/graph/queries.py` | 用 hop count × $0.50 估算，非真實票價（實際票價差距可達 10 倍）。回傳結果的 `fare_note` 欄位已附警告。需呼叫 `check_national_rail_availability` 取得精確票價。 |
+
+---
+
+## Known Bugs
+
+- **O1** ✅ FIXED — `execute_cancellation` in `databases/relational/queries.py`:
+  departure time was hardcoded to midnight instead of actual departure_time.
+  Fixed: `datetime.combine(booking["travel_date"], booking["departure_time"])` now uses
+  the stored departure_time from the booking record for correct refund tier calculation.
+
+- **O2** ✅ FIXED — `query_delay_ripple` origin pollution: queried station appeared in its own
+  ripple results (with `hops_away=2`) due to cyclic paths in the graph.
+  Fixed by adding `WHERE affected.station_id <> $station_id` before the RETURN clause.
+  (`databases/graph/queries.py`)
+
+- **O3** ✅ FIXED — `find_alternative_routes` not registered in `agent.py`: LLM could select
+  the tool but it was silently dropped. Added tool definition to TOOLS, entry to TOOLS_SCHEMA,
+  and handler to `_execute_tool`. Import was already present.
+
+- **O4** ✅ FIXED — `get_station_connections` not registered in `agent.py`: same as O3.
+  Added `query_station_connections` import, tool definition, TOOLS_SCHEMA entry, and
+  `_execute_tool` handler.
+
+- **O5** ✅ FIXED — Fallback in `agent.py` overrode `find_alternative_routes` with `find_route`:
+  the route-trigger fallback fired even when LLM had correctly selected `find_alternative_routes`,
+  discarding the `avoid_station_id` parameter entirely.
+  Fixed by adding guard: `and not _tool_selected("find_alternative_routes", "origin_id", "destination_id", "avoid_station_id")`.
+
+- **O6** ✅ FIXED — `get_delay_ripple` tool parameter named `station_id` in TOOLS definition,
+  mismatched with `query_delay_ripple` function signature which uses `delayed_station_id`.
+  Renamed in TOOLS, TOOLS_SCHEMA, and `_execute_tool` handler.
+
+- **O7** ✅ FIXED — fastest/cheapest confusion in `find_route`: tool description did not clearly
+  map "fastest"/"quickest" → `optimise_by="time"` vs "cheapest" → `optimise_by="cost"`.
+  Updated `find_route` description and `optimise_by` parameter description.
+  Also added two SYSTEM_PROMPT rules: (1) logged-in user must never be told to log in again;
+  (2) if a tool returns empty/not-found, LLM must not invent data.
+
+---
+
+## Current Progress
+
+- ✅ PostgreSQL schema (schema1/schema2 split)
+- ✅ Argon2id password hashing (schema2.credentials)
+- ✅ Neo4j graph queries (6 functions)
+- ✅ pgvector RAG
+- ✅ seed.cypher constraints and indexes implemented
+- ✅ agent.py tool registration complete (find_alternative_routes, get_station_connections)
+- ✅ LLM prompt engineering fixes (fastest/cheapest, login hallucination, tool failure hallucination)
+- ✅ query_delay_ripple origin pollution fixed
+- ✅ fallback logic fixed for find_alternative_routes
+- ✅ 23/23 query unit tests passing
+- ✅ O1 退款計算 bug 已修（execute_cancellation 現在使用 booking.departure_time 計算退款時距）
+- ✅ generate_departure_times 實作（從 first/last/frequency 計算所有出發時間）
+- ✅ query_feedback_summary 實作（乘客評分統計 + Task 6 agent 工具）
