@@ -1,5 +1,6 @@
-# TASK 6 EXTENSION: Added query_feedback_summary() for feedback statistics
-# and recent comments from schema1.feedback table.
+# TASK 6 EXTENSION: Added query_feedback_summary() for feedback statistics,
+# generate_departure_times() for timetable computation, and modified
+# query_available_seats() / execute_booking() for per-train departure_time support.
 """
 TransitFlow — PostgreSQL / Relational Database Layer
 =====================================================

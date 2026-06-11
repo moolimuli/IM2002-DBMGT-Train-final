@@ -58,7 +58,7 @@ the course forum. All changes include dated inline comments (`# TASK 6 EXTENSION
 | Embed with stripped metadata | MODIFIED | Embedding input uses `_strip_metadata()` output; stored content retains full original text |
 
 ### 4. `train-mock-data/refund_policy.json`
-# TASK 6 EXTENSION
+*(JSON does not support comments — `# TASK 6 EXTENSION` marker cannot be added to data files; changes are documented here instead)*
 
 | Change | Type | Description |
 |--------|------|-------------|
@@ -66,7 +66,7 @@ the course forum. All changes include dated inline comments (`# TASK 6 EXTENSION
 | RF002 cancellation windows (W1–W3) | MODIFIED | Same explicit examples added for Express Service policy |
 
 ### 5. `train-mock-data/travel_policies.json`
-# TASK 6 EXTENSION
+*(JSON does not support comments — `# TASK 6 EXTENSION` marker cannot be added to data files; changes are documented here instead)*
 
 | Change | Type | Description |
 |--------|------|-------------|
@@ -76,6 +76,8 @@ the course forum. All changes include dated inline comments (`# TASK 6 EXTENSION
 | `accessibility.national_rail` | NEW | Expanded national rail accessibility: wheelchair spaces (2 per carriage), hearing loops, large print, helpline |
 
 ### 6. `.env`
+`# TASK 6 EXTENSION` marker added inline
+
 | Change | Type | Description |
 |--------|------|-------------|
 | `VECTOR_TOP_K=3` → `VECTOR_TOP_K=5` | MODIFIED | Increased search results from 3 to 5 for broader coverage |

@@ -1,6 +1,8 @@
 # TASK 6 EXTENSION: Added feedback query tool, policy keyword fallback routing,
 # content truncation fix, lost property / accessibility keyword support,
-# and _strip_metadata embedding optimisation integration.
+# _strip_metadata embedding optimisation integration, departure_time parameter
+# support (tool definitions + regex extraction fallback + Rule 8 deterministic
+# booking override for per-train seat pools).
 """
 TransitFlow — Intelligent Agent
 ================================
