@@ -374,7 +374,7 @@ ERROR: different vector dimensions 768 and 3072
 
 
 
-### Example 1：[Query Writing (query_national_rail_availability 優化)]
+### Example 1：Query Writing (query_national_rail_availability 優化)
 
 > **Context：**測試時發現 query_national_rail_availability 回傳的資料不夠豐富，AI 只拿到 schedule_id 但沒有站名、票價計算結果、剩餘座位數。
 
@@ -385,7 +385,7 @@ ERROR: different vector dimensions 768 and 3072
 
 ---
 
-### Example 2：[AI 輸出錯誤需要修正 (agent.py skip 邏輯)]
+### Example 2：AI 輸出錯誤需要修正 (agent.py skip 邏輯)
 
 > **Context：**測試第二題「fastest metro route from MS01 to MS14」時，debug panel 顯示 Skipped find_route — empty params，工具被跳過。
 
@@ -414,7 +414,7 @@ ERROR: different vector dimensions 768 and 3072
 
 ---
 
-### Example 5：[ Schema Design (Argon2id 密碼儲存)]
+### Example 5：Schema Design (Argon2id 密碼儲存)
 
 > **Context：** 需要實作安全的密碼儲存，老師要求使用 Argon2id，並且密碼不能和使用者資料放在同一個 table。
 
@@ -485,7 +485,7 @@ user_id UUID NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT
 
 ---
 
-## Section 7 — Task 6 Extension: Vector Search Optimisation, Feedback Query & Departure Time ,UI Changes Made, Departure Time
+## Section 7 — Task 6 Extension: Vector Search Optimisation, Feedback Query, Departure Time & UI Changes
 
 ### 7.1 Motivation
 
