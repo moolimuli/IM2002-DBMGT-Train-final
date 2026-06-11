@@ -448,11 +448,11 @@ ERROR: different vector dimensions 768 and 3072
 
 ### Example 4：[TODO]
 
-> **Context：** [建議涵蓋 Neo4j Cypher 或 graph 設計相關]
+> **Context：** 在跑 test_queries.py 的自動化測試時，Test 22 失敗。query_delay_ripple("NR03", hops=2) 的回傳結果包含了 NR03 自己，但預期結果應該只包含受影響的其他車站。
 
-> **Prompt：** [...]
+> **Prompt：** 「query_delay_ripple 的測試失敗，NR03 出現在自己的 ripple 結果裡（5 stations 而非預期的 4）。這是 Cypher 查詢的問題。請分析現有的查詢邏輯，找出為什麼起點站會出現在結果裡，並給我最小改動的修正方式。」
 
-> **Outcome：** [...]
+> **Outcome：** AI 分析後確認問題是 Cypher 查詢沒有過濾起點站，apoc.path.expandConfig 在某些路徑下會回傳起點節點。修正方式是在 RETURN 前加一行 WHERE affected.station_id <> $station_id。修正後重跑測試，23/23 全部通過。
 
 ---
 
