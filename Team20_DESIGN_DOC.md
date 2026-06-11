@@ -1,44 +1,12 @@
 # TransitFlow — Database Design Document
 
-<!-- ============================================================
-  編輯說明（給組員看，繳交前請刪除此區塊）
-  ============================================================
-  繳交檔名格式：Team<Id>_DESIGN_DOC.md（例如 Team01_DESIGN_DOC.md）
-  繳交方式：Markdown 或 PDF，透過 EEClass 上傳
-
-  文件共六個章節（標題必須與下方完全一致，否則可能不被計分）。
-  標記 [TODO] 的地方代表需要組員補充，其餘已根據現有程式碼填寫完成。
-
-  各章節滿分：
-    Section 1 — ER Diagram              : /25
-    Section 2 — Normalisation           : /20
-    Section 3 — Graph Design Rationale  : /25
-    Section 4 — Vector / RAG Design     : /15
-    Section 5 — AI Tool Usage Evidence  : /10
-    Section 6 — Reflection & Trade-offs : /5
-  ============================================================ -->
 
 ---
 
 ## Section 1 — Entity-Relationship Diagram
 
-<!-- ============================================================
-  評分重點（共 25 分）：
-  1. 所有 entity 都出現在圖中
-  2. Cardinality（1:N、M:N 等）必須標在「圖的連線上」，不能只寫在說明文字
-  3. 每個 entity 要顯示 PK、主要 FK、以及 2–3 個代表性欄位
-  4. 必須用工具繪製（dbdiagram.io / draw.io / Lucidchart），不接受手繪
+### ER 圖
 
-  [TODO] 請用 dbdiagram.io 或 draw.io 畫出以下的 ER 圖並嵌入截圖。
-         圖中每條連線都要有 cardinality 符號（1、N、M 等）。
-         建議參考下方的 Entity 清單來確認所有 entity 都有涵蓋。
-
-  注意陷阱：cardinality 標記若只出現在說明段落而不在圖上，該項得 0 分。
-  ============================================================ -->
-
-### [TODO] ER 圖（請嵌入圖片）
-
-> 請在此處插入 dbdiagram.io / draw.io 產出的 ER 圖截圖。
 ![ER Diagram](er_diagram.png)
 
 ### Entity 清單與主要關聯
@@ -49,23 +17,23 @@
 
 | Entity | PK | 主要關聯 |
 |--------|----|----------|
-| `users` | `user_id` (VARCHAR) | 1 user → N `national_rail_bookings`；1 user → N `metro_travels`；1 user → N `feedback` |
-| `metro_stations` | `station_id` | 1 station → N `metro_station_lines`；1 station → N `metro_schedule_stops` |
+| `users` | `user_id` (UUID) | 1 user → N `national_rail_bookings`；1 user → N `metro_travels`；1 user → N `feedback` |
+| `metro_stations` | `id` (SERIAL) | 1 station → N `metro_station_lines`；1 station → N `metro_schedule_stops` |
 | `metro_station_lines` | (station_id, line) | M:N junction：metro_stations ↔ lines |
-| `metro_schedules` | `schedule_id` | 1 schedule → N `metro_schedule_stops`；1 schedule → N `metro_schedule_days` |
+| `metro_schedules` | `id` (SERIAL) | 1 schedule → N `metro_schedule_stops`；1 schedule → N `metro_schedule_days` |
 | `metro_schedule_stops` | (schedule_id, station_id) | stop 序列 junction table |
 | `metro_schedule_days` | (schedule_id, day_of_week) | 運行日期 junction table |
-| `national_rail_stations` | `station_id` | 類同 metro_stations |
+| `national_rail_stations` | `id` (SERIAL) | 類同 metro_stations |
 | `national_rail_station_lines` | (station_id, line) | M:N junction |
-| `national_rail_schedules` | `schedule_id` | 1 → N stops、days、fare_classes |
+| `national_rail_schedules` | `id` (SERIAL) | 1 → N stops、days、fare_classes |
 | `national_rail_schedule_stops` | (schedule_id, station_id) | |
 | `national_rail_schedule_days` | (schedule_id, day_of_week) | |
 | `national_rail_fare_classes` | (schedule_id, fare_class) | |
 | `national_rail_seat_layouts` | (schedule_id, coach, seat_id) | 1 schedule → N seats |
-| `national_rail_bookings` | `booking_id` | N bookings → 1 user；N bookings → 1 schedule；soft ref → `payments` |
-| `metro_travels` | `trip_id` | N trips → 1 user；soft ref → `payments` |
-| `payments` | `payment_id` | soft ref → booking（rail 或 metro） |
-| `feedback` | `feedback_id` | soft ref → booking；N → 1 user |
+| `national_rail_bookings` | `booking_id` (UUID) | N bookings → 1 user；N bookings → 1 schedule；soft ref → `payments` |
+| `metro_travels` | `trip_id` (UUID) | N trips → 1 user；soft ref → `payments` |
+| `payments` | `payment_id` (UUID) | soft ref → booking（rail 或 metro） |
+| `feedback` | `feedback_id` (UUID) | soft ref → booking；N → 1 user |
 | `policy_documents` | `id` (SERIAL) | pgvector 使用，獨立存放 |
 
 **schema2（認證資料，獨立隔離）**
@@ -78,13 +46,6 @@
 
 ## Section 2 — Normalisation Justification
 
-<!-- ============================================================
-  評分重點（共 20 分）：
-  1. 至少一個 2NF 或 3NF 設計決策，需「點名 normal form + 說明 functional dependency」
-  2. 討論至少一個刻意的 de-normalisation（或解釋為何不需要）
-  3. Argon2id：說明為何優於 MD5/SHA-1，以及 salt 如何防彩虹表
-  4. 正確使用資料庫術語（functional dependency、candidate key、transitive dependency 等）
-  ============================================================ -->
 
 ### 2.1 第三正規化（3NF）設計決策：Stop 序列獨立為 Junction Table
 
@@ -147,29 +108,44 @@ Salt 是在雜湊密碼前自動附加的一段**隨機字串**，由 Argon2id �
 
 ---
 
-### 2.4 Primary Key 設計決策：VARCHAR vs UUID vs SERIAL
+### 2.4 Primary Key 設計決策：SERIAL vs UUID
 
-本系統採用 **VARCHAR(10) 作為大多數表的 PK**（如 `RU01`、`NR_SCH01`、`BK-A1B2C3`），而非自動遞增的 SERIAL 或隨機的 UUID。
+本系統依據資料的產生方式與使用情境，將所有 table 的 PK 分為兩類，分別選擇 SERIAL 或 UUID：
 
-<!-- [TODO] 請補充你們的選擇理由，以下是參考論點，請依實際討論修改 -->
+#### 靜態查詢表（Lookup Tables）→ SERIAL
+
+適用 table：`metro_stations`、`national_rail_stations`、`metro_schedules`、`national_rail_schedules`、`policy_documents`、`credentials`
+
+```sql
+-- 範例：metro_stations
+id  SERIAL  PRIMARY KEY
+```
 
 **選擇理由：**
-- 本系統為**單一部署的教育環境**，不存在分散式系統需要全局唯一 ID（UUID 的主要應用場景）。
-- VARCHAR PK 在 debug 和人工查詢時具可讀性（`BK-A1B2C3` 明顯是訂單 ID），降低操作錯誤風險。
-- 相較 UUID 的 36 字元，VARCHAR(10) 佔用空間更小，JOIN 效能略優。
-- SERIAL 雖簡單，但無法攜帶業務語意（無法從 ID 判斷是 rail 還是 metro 訂單）。
+- 這些 table 的資料在系統啟動時由 seed script 一次性載入，之後不再動態新增。
+- SERIAL 產生的緊湊整數（1, 2, 3…）在 B-tree index 上有最佳的 FK join 效能。
+- 這些 ID 從不對外暴露（API response 或 session token 中使用的是 `station_code` 等業務代碼），不需要防猜測。
+
+業務可讀代碼（如 `MS01`、`NR_SCH01`）另以 `station_code`、`schedule_code` 欄位儲存為 `VARCHAR UNIQUE NOT NULL`，與合成主鍵職責分離。
+
+#### 動態交易表（Transaction Tables）→ UUID
+
+適用 table：`users`、`national_rail_bookings`、`metro_travels`、`payments`、`feedback`
+
+```sql
+-- 範例：national_rail_bookings
+booking_id  UUID  PRIMARY KEY  DEFAULT gen_random_uuid()
+```
+
+**選擇理由：**
+- 這些 table 的記錄在執行期動態產生（註冊、訂票、付款），且 ID 需要對外暴露（session token、API response、客戶通知）。
+- UUID 防止 sequential enumeration：攻擊者無法透過遞增 ID 猜測其他使用者的訂單或帳號。
+- `gen_random_uuid()` 是 PostgreSQL 13+ 的內建函式，不需要額外 extension。
 
 ---
 
 ## Section 3 — Graph Database Design Rationale
 
-<!-- ============================================================
-  評分重點（共 25 分）：
-  1. 說明 nodes、relationships、properties 各自是什麼以及「為什麼這樣設計」
-  2. 具體演算法論證（Dijkstra vs SQL recursive CTE），不能只說「graph 比較快」
-  3. 描述至少兩種 query 類型，並解釋 graph model 如何使其成為可能
-  4. 討論 node identity：哪個 property 唯一識別 node，以及為什麼
-  ============================================================ -->
 
 ### 3.1 為什麼使用 Graph Database？
 
@@ -289,13 +265,6 @@ MERGE (n:MetroStation {station_id: $id})
 
 ## Section 4 — Vector / RAG Design
 
-<!-- ============================================================
-  評分重點（共 15 分）：
-  1. 說明嵌入什麼、以及為何 cosine similarity 適合語意搜尋
-     （不能只說「它測量相似度」，要說明為何是 magnitude-independent）
-  2. 完整的 RAG 四步驟 pipeline
-  3. Embedding 維度（768 或 3072）以及切換 provider 的後果
-  ============================================================ -->
 
 ### 4.1 嵌入了什麼內容？
 
@@ -403,68 +372,9 @@ ERROR: different vector dimensions 768 and 3072
 
 ## Section 5 — AI Tool Usage Evidence
 
-<!-- ============================================================
-  評分重點（共 10 分）：
-  - 3 到 5 個例子，每個例子必須包含：Context、Prompt、Outcome 三個欄位
-  - 至少一個例子描述 AI 給出錯誤輸出，以及如何發現和修正
-  - Prompt 要具體有意義，不能是泛泛的「解釋資料庫」
-  - 涵蓋不同面向（schema 設計、query 撰寫、debug、設計理由等）
 
-  [TODO] 請組員根據實際使用 AI 工具（ChatGPT / Claude / Gemini 等）
-         的真實對話補充以下 5 個例子。
-         每個例子的三個欄位都必須填寫，缺任何一個欄位會扣分。
-         範例格式如下，請依序修改後填入。
-  ============================================================ -->
 
-### Example 1：[TODO]
-
-> **Context：** [說明當時在做什麼，例如：在設計 national_rail_schedule_stops 表格時，不確定是否需要獨立的 junction table]
-
-> **Prompt：** [貼上你實際傳給 AI 的 prompt，要具體，包含你的情境和問題]
-
-> **Outcome：** [AI 的回答是否有用？你怎麼使用或修改它的建議？]
-
----
-
-### Example 2：[TODO]
-
-> **Context：** [建議涵蓋 SQL query 撰寫相關]
-
-> **Prompt：** [...]
-
-> **Outcome：** [...]
-
----
-
-### Example 3：[TODO — 此例必須描述 AI 給出錯誤輸出的情況]
-
-> **Context：** [說明情境]
-
-> **Prompt：** [你問了什麼]
-
-> **Outcome：** AI 的回答有誤：[說明什麼地方錯了，如何發現錯誤，以及你做了什麼修正]
-
----
-
-### Example 4：[TODO]
-
-> **Context：** [建議涵蓋 Neo4j Cypher 或 graph 設計相關]
-
-> **Prompt：** [...]
-
-> **Outcome：** [...]
-
----
-
-### Example 5：[ Schema Design (Argon2id 密碼儲存)]
-
-> **Context**：需要實作安全的密碼儲存，老師要求使用 Argon2id，並且密碼不能和使用者資料放在同一個 table。
-
-> **Prompt：** [老師說一定要使用 Argon2id 並且也要有 salt，我們最後選擇 Option 3（同一個 DB，兩個不同 Schema）]
-
-> **Outcome：** AI 提供了完整的實作方案：在 schema1.users 移除 password 欄位，新增 schema2.credentials 存放 Argon2id hash。並提供 register_user、login_user、update_password 的完整修改版本。驗證腳本 verify_password.py 跑出全部 ✅，確認實作正確。
-
-### Example 6：[Query Writing (query_national_rail_availability 優化)]
+### Example 1：[Query Writing (query_national_rail_availability 優化)]
 
 > **Context：**測試時發現 query_national_rail_availability 回傳的資料不夠豐富，AI 只拿到 schedule_id 但沒有站名、票價計算結果、剩餘座位數。
 
@@ -472,7 +382,10 @@ ERROR: different vector dimensions 768 and 3072
 
 > **Outcome：** AI 重寫了 SQL query，加入 JOIN national_rail_stations 取得站名，直接在 SQL 裡計算 ROUND(base_fare_usd + per_stop_rate_usd * stops) 得出票價，並加入 seat_availability 子查詢。測試後資料大幅改善，8b 模型能正確回答班次問題。
 
-### Example 7：[AI 輸出錯誤需要修正 (agent.py skip 邏輯)]
+
+---
+
+### Example 2：[AI 輸出錯誤需要修正 (agent.py skip 邏輯)]
 
 > **Context：**測試第二題「fastest metro route from MS01 to MS14」時，debug panel 顯示 Skipped find_route — empty params，工具被跳過。
 
@@ -481,14 +394,37 @@ ERROR: different vector dimensions 768 and 3072
 > **Outcome：** AI 找到 agent.py 第 736 行 if any(v == "" for v in params.values())，這個邏輯會因為 1b 模型傳入空的 avoid_station_id 而跳過整個 find_route 工具。AI 的初版修正是把所有空字串都過濾，但這樣仍然會誤判。最終修正是只檢查必填參數，建立 _required 字典對應每個工具的必填欄位，選填參數的空字串不影響執行。
 ---
 
+### Example 3：query_cheapest_route 未考慮 fare_class — AI 生成錯誤的 Cypher 權重邏輯
+
+> **Context：** 實作 `query_cheapest_route` 時，請 AI 生成 Cypher 查詢，根據票價計算兩站之間的最便宜路線。
+
+> **Prompt：** 「請幫我寫一個 Neo4j Cypher 查詢，找出兩站之間總票價最低的路線，票價計算方式為 base_fare + per_stop_rate × stops。」
+
+> **Outcome：** AI 的回答有誤：生成的 Cypher 在計算 cost 時沒有把 fare_class 納入權重，導致 standard 和 first class 查詢回傳完全相同的最便宜路線，票價也相同。發現方式：手動執行 C2 測項，比較 standard 與 first class 的查詢結果，發現兩者數字一致，不符合預期。修正方式：在 Cypher 的 cost 計算中加入 fare_class 對應的費率係數，使不同艙等的票價正確反映在路線排序上。
+
+---
+
+### Example 4：query_delay_ripple 起點站出現在自己的影響範圍結果中
+
+> **Context：** 在跑 test_queries.py 的自動化測試時，Test 22 失敗。query_delay_ripple("NR03", hops=2) 的回傳結果包含了 NR03 自己，但預期結果應該只包含受影響的其他車站。
+
+> **Prompt：** 「query_delay_ripple 的測試失敗，NR03 出現在自己的 ripple 結果裡（5 stations 而非預期的 4）。這是 Cypher 查詢的問題。請分析現有的查詢邏輯，找出為什麼起點站會出現在結果裡，並給我最小改動的修正方式。」
+
+> **Outcome：** AI 分析後確認問題是 Cypher 查詢沒有過濾起點站，apoc.path.expandConfig 在某些路徑下會回傳起點節點。修正方式是在 RETURN 前加一行 WHERE affected.station_id <> $station_id。修正後重跑測試，23/23 全部通過。
+
+---
+
+### Example 5：[ Schema Design (Argon2id 密碼儲存)]
+
+> **Context：** 需要實作安全的密碼儲存，老師要求使用 Argon2id，並且密碼不能和使用者資料放在同一個 table。
+
+> **Prompt：** 「我需要在 TransitFlow 實作 Argon2id 密碼儲存。老師要求密碼 hash 不能和使用者個人資料放在同一個 table。我們決定使用同一個 DB 但拆成兩個 schema：schema1 存放使用者資料，schema2 存放密碼 hash。請幫我設計 schema2.credentials 的 table 結構，以及修改後的 register_user()、login_user()、update_password() 函式。」
+
+> **Outcome：** AI 提供了完整的實作方案：在 schema1.users 移除 password 欄位，新增 schema2.credentials 存放 Argon2id hash。並提供 register_user、login_user、update_password 的完整修改版本。驗證腳本 verify_password.py 跑出全部正確，確認實作正確。
+
+
 ## Section 6 — Reflection & Trade-offs
 
-<!-- ============================================================
-  評分重點（共 5 分）：
-  1. 兩個具體的設計決策，需說明「為什麼這樣選，不那樣選」
-     （不能模糊，要具體：「我們選 VARCHAR 而非 UUID，因為...」）
-  2. 一個在 production 環境中需要不同做法的具體面向
-  ============================================================ -->
 
 ### 6.1 設計決策一：密碼雜湊隔離在獨立的 `schema2.credentials`
 
@@ -519,19 +455,6 @@ status VARCHAR(20) NOT NULL  -- 'confirmed', 'completed', 'cancelled'
 
 ### 6.3 在 Production 系統中的不同做法
 
-<!-- ============================================================
-  給組員的說明：修改此段前請先閱讀
-  ============================================================
-  此段內容在先前版本是「錯誤的」：舊版聲稱所有 FK 都沒有指定
-  ON DELETE 行為。這個問題已在 schema.sql 修正——所有 FK 現在
-  都明確標注了 ON DELETE CASCADE 或 ON DELETE RESTRICT。
-
-  此段已重新撰寫，正確描述我們實際實作的內容與選擇理由，
-  並對比 production 系統還需要哪些額外機制。
-
-  請勿將內容改回「FK 沒有 ON DELETE 行為」的舊版本——
-  那與程式碼事實矛盾，TA 對照 schema.sql 會直接扣分。
-  ============================================================ -->
 
 **FK Cascade 行為的設計與 Production 考量：**
 
@@ -540,12 +463,12 @@ status VARCHAR(20) NOT NULL  -- 'confirmed', 'completed', 'cancelled'
 ```sql
 -- Detail / junction tables: CASCADE — when the parent is removed,
 -- orphaned child rows have no meaning and should be cleaned up automatically.
-station_id VARCHAR(10) NOT NULL REFERENCES schema1.metro_stations(station_id) ON DELETE CASCADE
+station_id INTEGER NOT NULL REFERENCES schema1.metro_stations(id) ON DELETE CASCADE
 
 -- Financial / audit records: RESTRICT — prevent deletion of a user or
 -- schedule if bookings, payments, or feedback still reference it.
 -- This protects the audit trail and avoids broken financial records.
-user_id VARCHAR(10) NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT
+user_id UUID NOT NULL REFERENCES schema1.users(user_id) ON DELETE RESTRICT
 ```
 
 **選擇理由：**
@@ -913,11 +836,3 @@ lookup — faster and more reliable than asking the chat assistant.
 > **Tab 3 — Station Lookup** (MS01 connections shown in table)
 > ![Tab 3 Station Lookup](screenshots/tab3_station_lookup.png)
 
-<!-- ============================================================
-  [提醒] 繳交前請確認：
-  1. Section 1 已有 ER 圖截圖，cardinality 標在圖的連線上
-  2. Section 5 的 5 個 AI 例子全部填完，每個有 Context + Prompt + Outcome
-  3. 檔名改為 Team<Id>_DESIGN_DOC.md（例如 Team01_DESIGN_DOC.md）
-  4. 若有 Task 6，新增 Section 7 在本文件末尾
-  5. 刪除所有 [TODO] 標記和 HTML 註解（<!-- --> 區塊）再繳交
-  ============================================================ -->
